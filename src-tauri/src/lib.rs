@@ -351,14 +351,16 @@ pub fn run() {
 
             // Strip webview — left 36px, always visible
             window.add_child(
-                WebviewBuilder::new("strip", tauri::WebviewUrl::App("strip.html".into())),
+                WebviewBuilder::new("strip", tauri::WebviewUrl::App("strip.html".into()))
+                    .auto_resize(),
                 tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
                 tauri::Size::Logical(tauri::LogicalSize::new(36.0, 900.0)),
             )?;
 
             // Hermes webview — fills rest, starts with splash screen
             let hermes_wv = window.add_child(
-                WebviewBuilder::new("hermes", tauri::WebviewUrl::App("/".into())),
+                WebviewBuilder::new("hermes", tauri::WebviewUrl::App("/".into()))
+                    .auto_resize(),
                 tauri::Position::Logical(tauri::LogicalPosition::new(36.0, 0.0)),
                 tauri::Size::Logical(tauri::LogicalSize::new(1400.0, 900.0)),
             )?;
