@@ -5,6 +5,7 @@
   <title>Hermes</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
       background: #0f1117;
       color: #c9d1d9;
@@ -14,10 +15,19 @@
       align-items: center;
       justify-content: center;
       height: 100vh;
-      gap: 20px;
+      gap: 16px;
+      padding: 32px;
     }
+
     .logo { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
-    .status { font-size: 0.9rem; color: #8b949e; }
+
+    #status {
+      font-size: 0.88rem;
+      color: #8b949e;
+      min-height: 1.2em;
+    }
+
+    /* Animated dots shown while status is the default "Starting" text */
     .dot {
       display: inline-block;
       animation: blink 1.2s infinite;
@@ -26,20 +36,77 @@
     .dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes blink {
       0%, 80%, 100% { opacity: 0.2; }
-      40% { opacity: 1; }
+      40%           { opacity: 1;   }
     }
-    #error {
+
+    /* ── Log panel ─────────────────────────────────────────────────────── */
+    #log-panel {
       display: none;
-      color: #f85149;
-      font-size: 0.85rem;
-      max-width: 420px;
-      text-align: center;
-      line-height: 1.5;
-      background: #1c1c2e;
-      padding: 12px 18px;
-      border-radius: 6px;
-      border: 1px solid #3d1a1a;
+      flex-direction: column;
+      width: 100%;
+      max-width: 640px;
     }
+
+    #log-panel.visible { display: flex; }
+
+    #log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 12px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-bottom: none;
+      border-radius: 6px 6px 0 0;
+      font-size: 0.75rem;
+      color: #8b949e;
+    }
+
+    #log-header.error-header {
+      background: #1c1016;
+      border-color: #6e1a1a;
+      color: #f85149;
+      font-weight: 600;
+    }
+
+    #copy-btn {
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 0.73rem;
+      cursor: pointer;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #c9d1d9;
+      transition: opacity 0.15s;
+    }
+    #copy-btn:hover { opacity: 0.8; }
+
+    #log-lines {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 0 0 6px 6px;
+      padding: 10px 14px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: #8b949e;
+      max-height: 260px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      word-break: break-all;
+      white-space: pre-wrap;
+    }
+
+    #log-panel.error-mode #log-lines {
+      border-color: #6e1a1a;
+      max-height: 360px;
+      color: #c9d1d9;
+    }
+
+    .log-line { display: block; }
+    .log-line.error-line { color: #f85149; }
+
+    /* ── Update banner ─────────────────────────────────────────────────── */
     #update-banner {
       display: none;
       position: fixed;
@@ -53,25 +120,15 @@
       min-width: 320px;
       max-width: 480px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      display: none;
       flex-direction: column;
       gap: 10px;
     }
     #update-banner.visible { display: flex; }
-    .update-title {
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #e6edf3;
-    }
-    .update-subtitle {
-      font-size: 0.8rem;
-      color: #8b949e;
-    }
-    .update-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-    }
+
+    .update-title    { font-size: 0.9rem; font-weight: 600; color: #e6edf3; }
+    .update-subtitle { font-size: 0.8rem; color: #8b949e; }
+    .update-actions  { display: flex; gap: 8px; justify-content: flex-end; }
+
     .btn {
       padding: 6px 14px;
       border-radius: 6px;
@@ -81,59 +138,112 @@
       border: none;
       transition: opacity 0.15s;
     }
-    .btn:hover { opacity: 0.85; }
-    .btn-primary {
-      background: #238636;
-      color: #fff;
-    }
-    .btn-secondary {
-      background: #21262d;
-      color: #c9d1d9;
-      border: 1px solid #30363d;
-    }
+    .btn:hover    { opacity: 0.85; }
     .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary   { background: #238636; color: #fff; }
+    .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
   </style>
 </head>
 <body>
   <div class="logo">Hermes</div>
-  <div class="status" id="status">
+  <div id="status">
     Starting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
   </div>
-  <div id="error"></div>
 
+  <!-- Live log panel -->
+  <div id="log-panel">
+    <div id="log-header">
+      <span id="log-label">Server output</span>
+      <button id="copy-btn" onclick="copyLog()">Copy</button>
+    </div>
+    <div id="log-lines"></div>
+  </div>
+
+  <!-- Update banner -->
   <div id="update-banner">
     <div class="update-title" id="update-title">New version available</div>
-    <div class="update-subtitle" id="update-subtitle">Install now and restart to apply the update.</div>
+    <div class="update-subtitle">Install now and restart to apply the update.</div>
     <div class="update-actions">
-      <button class="btn btn-secondary" id="btn-later" onclick="dismissUpdate()">Later</button>
+      <button class="btn btn-secondary" onclick="dismissUpdate()">Later</button>
       <button class="btn btn-primary" id="btn-install" onclick="installUpdate()">Install &amp; Restart</button>
     </div>
   </div>
 
   <script>
+    var logText = '';
+
     window.__hermesSetStatus = function(msg) {
-      document.getElementById('status').textContent = msg;
+      var el = document.getElementById('status');
+      el.textContent = msg;
+      // Also append to log panel if already visible
+      appendLog(msg, false);
+    };
+
+    window.__hermesAppendLog = function(line, isError) {
+      appendLog(line, isError || false);
     };
 
     window.__hermesShowError = function(msg) {
-      document.getElementById('status').style.display = 'none';
-      const el = document.getElementById('error');
-      el.textContent = msg;
-      el.style.display = 'block';
+      // Switch status to error summary (first line)
+      var firstLine = msg.split('\n')[0];
+      document.getElementById('status').textContent = firstLine;
+      document.getElementById('status').style.color = '#f85149';
+
+      // Switch log panel to error mode
+      var panel = document.getElementById('log-panel');
+      panel.classList.add('visible', 'error-mode');
+      document.getElementById('log-header').classList.add('error-header');
+      document.getElementById('log-label').textContent = 'Error details';
+
+      // Append any extra detail lines (e.g. "Last output:" block)
+      var extra = msg.split('\n').slice(1).join('\n').trim();
+      if (extra) {
+        appendLog(extra, true);
+      }
+
+      scrollLog();
     };
 
     window.__hermesShowUpdate = function(version) {
-      document.getElementById('update-title').textContent =
-        'Update available: v' + version;
+      document.getElementById('update-title').textContent = 'Update available: v' + version;
       document.getElementById('update-banner').classList.add('visible');
     };
+
+    function appendLog(line, isError) {
+      if (!line || !line.trim()) return;
+      logText += line + '\n';
+
+      var panel = document.getElementById('log-panel');
+      panel.classList.add('visible');
+
+      var container = document.getElementById('log-lines');
+      var span = document.createElement('span');
+      span.className = 'log-line' + (isError ? ' error-line' : '');
+      span.textContent = line;
+      container.appendChild(span);
+      container.appendChild(document.createTextNode('\n'));
+      scrollLog();
+    }
+
+    function scrollLog() {
+      var el = document.getElementById('log-lines');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function copyLog() {
+      navigator.clipboard.writeText(logText).then(function() {
+        var btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+      });
+    }
 
     function dismissUpdate() {
       document.getElementById('update-banner').classList.remove('visible');
     }
 
     async function installUpdate() {
-      const btn = document.getElementById('btn-install');
+      var btn = document.getElementById('btn-install');
       btn.disabled = true;
       btn.textContent = 'Installing…';
       try {

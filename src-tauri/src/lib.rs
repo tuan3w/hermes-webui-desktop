@@ -1,6 +1,6 @@
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandEvent;
@@ -415,12 +415,33 @@ pub fn run() {
 
                 *handle.state::<ServerState>().child.lock().unwrap() = Some(child);
 
+                // Collect server output: show each line on the splash screen and
+                // keep the last 20 lines so we can include them in any error message.
+                let log_buf: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+                let log_buf_writer = log_buf.clone();
+                let handle_log = handle.clone();
+
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
                             CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
-                                if let Ok(line) = std::str::from_utf8(&b) {
-                                    eprint!("[server] {line}");
+                                if let Ok(text) = std::str::from_utf8(&b) {
+                                    eprint!("[server] {text}");
+                                    for line in text.lines() {
+                                        let trimmed = line.trim().to_string();
+                                        if trimmed.is_empty() { continue; }
+                                        // Stream each line to the log panel in the splash screen
+                                        let esc = trimmed
+                                            .replace('\\', "\\\\")
+                                            .replace('"', "\\\"")
+                                            .replace('\n', "\\n");
+                                        if let Some(win) = handle_log.get_webview_window("main") {
+                                            let _ = win.eval(&format!(
+                                                r#"window.__hermesAppendLog && window.__hermesAppendLog("{esc}", false)"#
+                                            ));
+                                        }
+                                        log_buf_writer.lock().unwrap().push(trimmed);
+                                    }
                                 }
                             }
                             CommandEvent::Terminated(s) => {
@@ -442,11 +463,16 @@ pub fn run() {
                         let _ = win.eval(&format!("window.location='http://{SERVER_HOST}:{port}'"));
                     }
                 } else {
+                    let tail = log_buf.lock().unwrap().join("\n");
+                    let detail = if tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\nLast output:\n{tail}")
+                    };
                     show_error(
                         &handle,
                         &format!(
-                            "Server did not respond on :{port} within 60 s.\n\
-                             Run from a terminal to see the full error output."
+                            "Server did not respond on :{port} within 60 s.{detail}"
                         ),
                     );
                 }
