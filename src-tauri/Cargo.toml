@@ -23,3 +23,15 @@ tokio = { version = "1", features = ["net", "time"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0", features = ["v2_8"] }
+
+[profile.dev]
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Faster local release builds — CI uses full optimization via CARGO_PROFILE_RELEASE_LTO=thin
+[profile.release]
+codegen-units = 16
+lto = false

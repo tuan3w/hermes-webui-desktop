@@ -221,12 +221,12 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 
     let open = MenuItemBuilder::with_id("open", "Open Hermes").build(app)?;
-    let check_update = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
+    let check_update_item = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &check_update, &sep, &quit])
+        .items(&[&open, &check_update_item, &sep, &quit])
         .build()?;
 
     TrayIconBuilder::with_id("main")
@@ -287,45 +287,6 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-// ── Menu bar ──────────────────────────────────────────────────────────────────
-
-fn build_menu(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-
-    let check_item = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
-    let help = SubmenuBuilder::new(app, "Help").item(&check_item).build()?;
-    let menu = MenuBuilder::new(app).items(&[&help]).build()?;
-    app.set_menu(menu)?;
-
-    let handle = app.handle().clone();
-    app.on_menu_event(move |_app, event| {
-        if event.id() == "check_update" {
-            let h = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let state = h.state::<UpdateState>();
-                match check_update(h.clone(), state).await {
-                    Ok(Some(version)) => {
-                        if let Some(win) = h.get_webview_window("main") {
-                            let v = version.replace('"', "\\\"");
-                            let _ = win.eval(&format!(
-                                r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
-                            ));
-                        }
-                    }
-                    Ok(None) => {
-                        if let Some(win) = h.get_webview_window("main") {
-                            let _ = win.eval(r#"alert("You're up to date!")"#);
-                        }
-                    }
-                    Err(e) => eprintln!("[updater] manual check failed: {e}"),
-                }
-            });
-        }
-    });
-
-    Ok(())
-}
-
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -349,7 +310,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![check_update, install_update])
         .setup(|app| {
             build_tray(app)?;
-            build_menu(app)?;
 
             let window = tauri::WebviewWindowBuilder::new(
                 app,
@@ -359,8 +319,6 @@ pub fn run() {
             .title("Hermes")
             .inner_size(1400.0, 900.0)
             .min_inner_size(900.0, 600.0)
-            // Restore previous size/position
-            .restore_state(tauri_plugin_window_state::StateFlags::all())
             .build()?;
 
             #[cfg(target_os = "linux")]
