@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hermes",
+  "productName": "Hermes WebUI Desktop",
   "version": "0.1.0",
-  "identifier": "com.nousresearch.hermes",
+  "identifier": "com.tuan3w.hermes-webui-desktop",
   "build": {
     "frontendDist": "../desktop"
   },
