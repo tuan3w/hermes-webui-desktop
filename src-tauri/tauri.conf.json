@@ -26,9 +26,7 @@
     "targets": "all",
     "macOS": {
       "entitlements": "entitlements.plist",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Hermes uses the microphone for voice input."
-      }
+      "infoPlist": "Info.plist"
     },
     "icon": [
       "icons/32x32.png",
