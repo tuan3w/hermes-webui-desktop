@@ -4,6 +4,15 @@ Native desktop app for [Hermes Web UI](https://github.com/nesquena/hermes-webui)
 
 Built with [Tauri v2](https://tauri.app/). Ships as a single installer that bundles the Hermes Web UI Python server — no separate install required.
 
+## Table of Contents
+
+- [Platforms](#platforms)
+- [How it works](#how-it-works)
+- [Building](#building)
+- [macOS — first launch warning](#macos--first-launch-warning)
+- [Staying up to date with upstream](#staying-up-to-date-with-upstream)
+- [Repository structure](#repository-structure)
+
 ## Platforms
 
 | Platform | Format |
