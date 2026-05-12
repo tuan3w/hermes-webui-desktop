@@ -48,6 +48,8 @@ docs/*
 !docs/docker.md
 !docs/supervisor.md
 !docs/troubleshooting.md
+!docs/superpowers/
+!docs/superpowers/**
 
 # Local-only PR review harness: rendering drivers, sample bank, fixtures.
 # Used by Claude during deep reviews; never shared in the repo.
@@ -56,3 +58,4 @@ graphify-out/
 .graphify_cached.json
 .graphify_uncached.txt
 /src-tauri/binaries/
+.superpowers/
