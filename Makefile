@@ -1,4 +1,4 @@
-.PHONY: build build-deb dev icons sync-upstream clean help
+.PHONY: build build-deb dev icons update sync-upstream clean help
 
 TAURI_CLI_VERSION := ^2.0
 SRC_TAURI        := src-tauri
@@ -11,7 +11,7 @@ help:
 	@echo "  make build-deb      Build .deb package only (Linux)"
 	@echo "  make dev            Run in development mode (hot-reload webview)"
 	@echo "  make icons          Regenerate icons from hermes-webui/static/favicon-512.png"
-	@echo "  make sync-upstream  Pull latest hermes-webui and commit the submodule bump"
+	@echo "  make update         Pull latest hermes-webui and commit the submodule bump"
 	@echo "  make clean          Remove build artifacts"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ $(ICON_DIR)/32x32.png: $(ICON_SRC)
 	@echo "Icons generated in $(ICON_DIR)/"
 
 # ── Upstream sync ─────────────────────────────────────────────────────────────
-sync-upstream:
+update sync-upstream:
 	git submodule update --remote --merge hermes-webui
 	@if git diff --quiet hermes-webui; then \
 	  echo "Already up to date."; \
