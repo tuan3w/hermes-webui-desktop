@@ -36,6 +36,23 @@ bash scripts/build-desktop.sh
 
 Artifacts land in `src-tauri/target/release/bundle/`.
 
+## macOS — first launch warning
+
+The app is not signed with an Apple Developer certificate, so macOS Gatekeeper will block it on first launch.
+
+**One-time fix:**
+
+1. Right-click (or Control-click) the `.dmg` → **Open**
+2. Click **Open** in the dialog that appears
+
+Or run this in Terminal after installing:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/hermes-webui-desktop.app
+```
+
+You only need to do this once.
+
 ## Staying up to date with upstream
 
 The Hermes Web UI source lives in `hermes-webui/` as a git submodule pointing at [nesquena/hermes-webui](https://github.com/nesquena/hermes-webui).
