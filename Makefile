@@ -1,4 +1,4 @@
-.PHONY: build dev icons sync-upstream clean help
+.PHONY: build build-deb dev icons sync-upstream clean help
 
 TAURI_CLI_VERSION := ^2.0
 SRC_TAURI        := src-tauri
@@ -8,6 +8,7 @@ ICON_DIR         := $(SRC_TAURI)/icons
 help:
 	@echo "Hermes Desktop — available targets:"
 	@echo "  make build          Build the Tauri app for the current platform"
+	@echo "  make build-deb      Build .deb package only (Linux)"
 	@echo "  make dev            Run in development mode (hot-reload webview)"
 	@echo "  make icons          Regenerate icons from hermes-webui/static/favicon-512.png"
 	@echo "  make sync-upstream  Pull latest hermes-webui and commit the submodule bump"
@@ -19,6 +20,12 @@ build: icons _ensure-tauri
 	@echo ""
 	@echo "Artifacts:"
 	@find $(SRC_TAURI)/target/release/bundle \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" \) 2>/dev/null | sed 's/^/  /'
+
+build-deb: icons _ensure-tauri
+	cd $(SRC_TAURI) && cargo tauri build --bundles deb
+	@echo ""
+	@echo "Artifact:"
+	@find $(SRC_TAURI)/target/release/bundle/deb -name "*.deb" 2>/dev/null | sed 's/^/  /'
 
 # ── Dev mode ──────────────────────────────────────────────────────────────────
 dev: _ensure-tauri
