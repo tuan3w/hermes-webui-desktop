@@ -1,4 +1,4 @@
-.PHONY: build build-deb dev icons update sync-upstream clean help
+.PHONY: build build-deb dev dev-ui icons update sync-upstream clean help
 
 TAURI_CLI_VERSION := ^2.0
 SRC_TAURI        := src-tauri
@@ -9,7 +9,8 @@ help:
 	@echo "Hermes Desktop — available targets:"
 	@echo "  make build          Build the Tauri app for the current platform"
 	@echo "  make build-deb      Build .deb package only (Linux)"
-	@echo "  make dev            Run in development mode (hot-reload webview)"
+	@echo "  make dev            Run in development mode (Ctrl+R to reload splash UI)"
+	@echo "  make dev-ui         Serve splash screen only at http://localhost:1421"
 	@echo "  make icons          Regenerate icons from hermes-webui/static/favicon-512.png"
 	@echo "  make update         Pull latest hermes-webui and commit the submodule bump"
 	@echo "  make clean          Remove build artifacts"
@@ -29,7 +30,14 @@ build-deb: _ensure-tauri
 
 # ── Dev mode ──────────────────────────────────────────────────────────────────
 dev: _ensure-tauri
-	cd $(SRC_TAURI) && cargo tauri dev
+	@python3 -m http.server 1421 --directory desktop >/dev/null 2>&1 & \
+	  SERVER_PID=$$!; \
+	  trap "kill $$SERVER_PID 2>/dev/null" EXIT INT TERM; \
+	  cd $(SRC_TAURI) && cargo tauri dev
+
+dev-ui:
+	@echo "Serving splash screen at http://localhost:1421 — edit desktop/index.html and refresh"
+	python3 -m http.server 1421 --directory desktop
 
 # ── Icons ─────────────────────────────────────────────────────────────────────
 icons: $(ICON_DIR)/32x32.png

@@ -175,6 +175,11 @@ async fn background_check_update(handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
+#[tauri::command]
 async fn check_update(
     handle: tauri::AppHandle,
     state: tauri::State<'_, UpdateState>,
@@ -320,7 +325,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(ServerState { child: Mutex::new(None) })
         .manage(UpdateState { pending: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![check_update, install_update])
+        .invoke_handler(tauri::generate_handler![open_devtools, check_update, install_update])
         .setup(|app| {
             build_tray(app)?;
 

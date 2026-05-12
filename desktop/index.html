@@ -238,6 +238,14 @@
       });
     }
 
+    // Ctrl+Shift+I or F12 → open DevTools
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+        e.preventDefault();
+        if (window.__TAURI__) window.__TAURI__.core.invoke('open_devtools');
+      }
+    });
+
     function dismissUpdate() {
       document.getElementById('update-banner').classList.remove('visible');
     }
