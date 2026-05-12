@@ -49,15 +49,6 @@ jobs:
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
 
-      - name: Generate icons
-        run: |
-          src=hermes-webui/static/favicon-512.png
-          convert "$src" -resize 32x32   src-tauri/icons/32x32.png
-          convert "$src" -resize 128x128 src-tauri/icons/128x128.png
-          convert "$src" -resize 256x256 src-tauri/icons/256x256.png
-          cp "$src" src-tauri/icons/512x512.png
-          cp "$src" src-tauri/icons/icon.png
-
       - name: Build (deb + AppImage)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -101,15 +92,6 @@ jobs:
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
 
-      - name: Generate icons
-        run: |
-          src=hermes-webui/static/favicon-512.png
-          sips -z 32   32   "$src" --out src-tauri/icons/32x32.png
-          sips -z 128  128  "$src" --out src-tauri/icons/128x128.png
-          sips -z 256  256  "$src" --out src-tauri/icons/256x256.png
-          cp "$src" src-tauri/icons/512x512.png
-          cp "$src" src-tauri/icons/icon.png
-
       - name: Build (dmg)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -146,16 +128,6 @@ jobs:
 
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
-
-      - name: Generate icons
-        shell: pwsh
-        run: |
-          $src = "hermes-webui\static\favicon-512.png"
-          Copy-Item $src src-tauri\icons\32x32.png
-          Copy-Item $src src-tauri\icons\128x128.png
-          Copy-Item $src src-tauri\icons\256x256.png
-          Copy-Item $src src-tauri\icons\512x512.png
-          Copy-Item $src src-tauri\icons\icon.png
 
       - name: Build (nsis installer)
         env:

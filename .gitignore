@@ -39,7 +39,6 @@ Thumbs.db
 # Tauri desktop app build artifacts
 src-tauri/target/
 src-tauri/gen/
-src-tauri/icons/
 src-tauri/binaries/
 
 # Local reference clones — never committed (except tracked design/UI-UX reference pages)

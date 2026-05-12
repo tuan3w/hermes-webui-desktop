@@ -15,13 +15,13 @@ help:
 	@echo "  make clean          Remove build artifacts"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-build: icons _ensure-tauri
+build: _ensure-tauri
 	cd $(SRC_TAURI) && cargo tauri build
 	@echo ""
 	@echo "Artifacts:"
 	@find $(SRC_TAURI)/target/release/bundle \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" \) 2>/dev/null | sed 's/^/  /'
 
-build-deb: icons _ensure-tauri
+build-deb: _ensure-tauri
 	cd $(SRC_TAURI) && cargo tauri build --bundles deb
 	@echo ""
 	@echo "Artifact:"
