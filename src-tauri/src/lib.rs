@@ -222,11 +222,24 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
     let open = MenuItemBuilder::with_id("open", "Open Hermes").build(app)?;
     let check_update_item = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
+    let about = PredefinedMenuItem::about(
+        app,
+        Some("About Hermes"),
+        Some(tauri::menu::AboutMetadata {
+            name: Some("Hermes WebUI Desktop".to_string()),
+            version: Some(app.package_info().version.to_string()),
+            copyright: Some("© 2026 Nguyen Duc Tuan (tuan3w)".to_string()),
+            website: Some("https://github.com/tuan3w/hermes-webui-desktop".to_string()),
+            website_label: Some("GitHub".to_string()),
+            ..Default::default()
+        }),
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &check_update_item, &sep, &quit])
+        .items(&[&open, &sep, &check_update_item, &about, &sep2, &quit])
         .build()?;
 
     TrayIconBuilder::with_id("main")
