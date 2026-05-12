@@ -4,6 +4,9 @@ Native desktop app for [Hermes Web UI](https://github.com/nesquena/hermes-webui)
 
 Built with [Tauri v2](https://tauri.app/). Ships as a single installer that bundles the Hermes Web UI Python server — no separate install required.
 
+![Hermes Desktop — sessions view](screenshots/ui-sessions.png)
+![Hermes Desktop — workspace view](screenshots/ui-workspace.png)
+
 ## Table of Contents
 
 - [Platforms](#platforms)
