@@ -13,6 +13,18 @@ Built with [Tauri v2](https://tauri.app/). Ships as a single installer that bund
 - [Staying up to date with upstream](#staying-up-to-date-with-upstream)
 - [Repository structure](#repository-structure)
 
+## Download
+
+Grab the latest release from the [Releases page](https://github.com/tuan3w/hermes-webui-desktop/releases/latest).
+
+| Platform | File |
+|----------|------|
+| Linux (Debian/Ubuntu) | `hermes-webui-desktop_*_amd64.deb` |
+| Linux (portable) | `hermes-webui-desktop_*_amd64.AppImage` |
+| macOS Intel | `hermes-webui-desktop_*_x64.dmg` |
+| macOS Apple Silicon | `hermes-webui-desktop_*_aarch64.dmg` |
+| Windows | `hermes-webui-desktop_*_x64-setup.exe` |
+
 ## Platforms
 
 | Platform | Format |
