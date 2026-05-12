@@ -1,3 +1,5 @@
+mod pins;
+
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
