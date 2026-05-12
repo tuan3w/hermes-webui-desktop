@@ -53,14 +53,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          python3 -c "
-import json, pathlib
-p = pathlib.Path('src-tauri/tauri.conf.json')
-c = json.loads(p.read_text())
-c['version'] = '$VERSION'
-p.write_text(json.dumps(c, indent=2) + '\n')
-print('version set to $VERSION')
-"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+          mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+          echo "Version set to $VERSION"
 
       - name: Build (deb + AppImage)
         env:
@@ -109,14 +104,9 @@ print('version set to $VERSION')
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          python3 -c "
-import json, pathlib
-p = pathlib.Path('src-tauri/tauri.conf.json')
-c = json.loads(p.read_text())
-c['version'] = '$VERSION'
-p.write_text(json.dumps(c, indent=2) + '\n')
-print('version set to $VERSION')
-"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+          mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+          echo "Version set to $VERSION"
 
       - name: Build (dmg)
         env:
@@ -160,14 +150,9 @@ print('version set to $VERSION')
         shell: bash
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          python3 -c "
-import json, pathlib
-p = pathlib.Path('src-tauri/tauri.conf.json')
-c = json.loads(p.read_text())
-c['version'] = '$VERSION'
-p.write_text(json.dumps(c, indent=2) + '\n')
-print('version set to $VERSION')
-"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+          mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+          echo "Version set to $VERSION"
 
       - name: Build (nsis installer)
         env:
