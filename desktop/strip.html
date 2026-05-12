@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    width: 36px;
+    height: 100vh;
+    background: #111;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    gap: 6px;
+    overflow: hidden;
+    border-right: 1px solid #222;
+    user-select: none;
+  }
+
+  .pin {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #2a2a3a;
+    color: #8ab4f8;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.1s;
+  }
+  .pin:hover { background: #3a3a5a; border-color: #4a4aaa; }
+
+  .spacer { flex: 1; }
+
+  .add-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px dashed #444;
+    color: #555;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s;
+  }
+  .add-btn:hover { border-color: #8ab4f8; color: #8ab4f8; }
+
+  #ctx-menu {
+    position: fixed;
+    background: #1e1e2e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 4px 0;
+    font-family: system-ui, sans-serif;
+    font-size: 12px;
+    display: none;
+    z-index: 1000;
+    min-width: 100px;
+  }
+  #ctx-menu .item { padding: 6px 12px; cursor: pointer; color: #ccc; }
+  #ctx-menu .item:hover { background: #333; }
+  #ctx-menu .item.danger { color: #f87171; }
+
+  #popover {
+    position: fixed;
+    left: 40px;
+    bottom: 12px;
+    background: #1e1e2e;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 12px;
+    display: none;
+    z-index: 1000;
+    width: 220px;
+    font-family: system-ui, sans-serif;
+  }
+  #popover label { font-size: 11px; color: #888; display: block; margin-bottom: 2px; }
+  #popover input {
+    width: 100%;
+    background: #111;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #eee;
+    font-size: 12px;
+    padding: 5px 8px;
+    margin-bottom: 8px;
+    outline: none;
+  }
+  #popover input:focus { border-color: #4a7aff; }
+  #popover .row { display: flex; gap: 6px; }
+  #popover button {
+    flex: 1; padding: 6px; border-radius: 4px;
+    border: none; font-size: 12px; cursor: pointer;
+  }
+  #popover .confirm { background: #4a7aff; color: #fff; }
+  #popover .cancel { background: #333; color: #aaa; }
+</style>
+</head>
+<body>
+
+<div id="pins"></div>
+<div class="spacer"></div>
+<div class="add-btn" id="add-btn" title="Add pin">+</div>
+
+<div id="ctx-menu">
+  <div class="item danger" id="ctx-remove">Remove</div>
+</div>
+
+<div id="popover">
+  <label>URL</label>
+  <input id="pop-url" type="url" placeholder="http://localhost:1111">
+  <label>Label</label>
+  <input id="pop-label" type="text" placeholder="Hub">
+  <div class="row">
+    <button class="cancel" id="pop-cancel">Cancel</button>
+    <button class="confirm" id="pop-confirm">Add</button>
+  </div>
+</div>
+
+<script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+
+let ctxTarget = null;
+
+async function loadPins() {
+  const pins = await invoke('list_pins');
+  const container = document.getElementById('pins');
+  container.innerHTML = '';
+  for (const pin of pins) {
+    const el = document.createElement('div');
+    el.className = 'pin';
+    el.textContent = pin.label.charAt(0).toUpperCase();
+    el.title = pin.label + '\n' + pin.url;
+    el.addEventListener('click', () => invoke('open_pin', { url: pin.url, label: pin.label }));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      ctxTarget = pin.url;
+      const menu = document.getElementById('ctx-menu');
+      menu.style.display = 'block';
+      menu.style.left = '40px';
+      menu.style.top = Math.min(e.clientY, window.innerHeight - 60) + 'px';
+    });
+    container.appendChild(el);
+  }
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('ctx-menu').style.display = 'none';
+});
+
+document.getElementById('ctx-remove').addEventListener('click', async () => {
+  if (!ctxTarget) return;
+  await invoke('remove_pin', { url: ctxTarget });
+  ctxTarget = null;
+});
+
+document.getElementById('add-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById('popover');
+  pop.style.display = pop.style.display === 'block' ? 'none' : 'block';
+  if (pop.style.display === 'block') document.getElementById('pop-url').focus();
+});
+
+document.getElementById('pop-cancel').addEventListener('click', () => {
+  document.getElementById('popover').style.display = 'none';
+  document.getElementById('pop-url').value = '';
+  document.getElementById('pop-label').value = '';
+});
+
+document.getElementById('pop-confirm').addEventListener('click', async () => {
+  const url = document.getElementById('pop-url').value.trim();
+  const rawLabel = document.getElementById('pop-label').value.trim();
+  if (!url) return;
+  const label = rawLabel || (() => { try { return new URL(url).hostname; } catch { return url; } })();
+  await invoke('add_pin', { url, label });
+  document.getElementById('popover').style.display = 'none';
+  document.getElementById('pop-url').value = '';
+  document.getElementById('pop-label').value = '';
+});
+
+document.getElementById('pop-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('pop-label').focus();
+});
+document.getElementById('pop-label').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('pop-confirm').click();
+});
+
+listen('pins-updated', loadPins);
+loadPins();
+</script>
+</body>
+</html>
