@@ -5,6 +5,7 @@ use std::time::Duration;
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const SERVER_HOST: &str = "127.0.0.1";
 const UV_PYTHON: &str = "3.11";
@@ -12,6 +13,12 @@ const UV_PYTHON: &str = "3.11";
 struct ServerState {
     child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
 }
+
+struct UpdateState {
+    pending: Mutex<Option<tauri_plugin_updater::Update>>,
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn free_port() -> u16 {
     TcpListener::bind((SERVER_HOST, 0))
@@ -31,12 +38,19 @@ fn wait_for_server(port: u16) -> bool {
     false
 }
 
-/// Path to the Python interpreter inside a uv-managed venv.
 fn venv_python(venv_dir: &Path) -> PathBuf {
     if cfg!(windows) {
         venv_dir.join("Scripts").join("python.exe")
     } else {
         venv_dir.join("bin").join("python")
+    }
+}
+
+fn show_window(handle: &tauri::AppHandle) {
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        let _ = win.unminimize();
     }
 }
 
@@ -59,7 +73,8 @@ fn show_error(handle: &tauri::AppHandle, msg: &str) {
     }
 }
 
-/// Run a uv sub-command, stream its output to the splash status, wait for completion.
+// ── uv / venv ─────────────────────────────────────────────────────────────────
+
 async fn run_uv(handle: &tauri::AppHandle, args: &[&str]) -> Result<(), String> {
     let (mut rx, _child) = handle
         .shell()
@@ -70,7 +85,6 @@ async fn run_uv(handle: &tauri::AppHandle, args: &[&str]) -> Result<(), String> 
         .map_err(|e| format!("Failed to spawn uv: {e}"))?;
 
     let mut output = String::new();
-
     loop {
         match rx.recv().await {
             Some(CommandEvent::Stdout(b)) | Some(CommandEvent::Stderr(b)) => {
@@ -100,8 +114,6 @@ async fn run_uv(handle: &tauri::AppHandle, args: &[&str]) -> Result<(), String> 
     }
 }
 
-/// Create the venv and install requirements if they don't exist yet.
-/// Returns the path to the venv Python interpreter.
 async fn ensure_venv(
     handle: &tauri::AppHandle,
     resource_dir: &Path,
@@ -127,15 +139,10 @@ async fn ensure_venv(
 
     let req = resource_dir.join("requirements.txt");
     set_status(handle, "Installing Python dependencies…");
-    eprintln!("[hermes] Installing {}", req.display());
 
     run_uv(
         handle,
-        &[
-            "pip", "install",
-            "-r", req.to_str().unwrap(),
-            "--python", python.to_str().unwrap(),
-        ],
+        &["pip", "install", "-r", req.to_str().unwrap(), "--python", python.to_str().unwrap()],
     )
     .await
     .map_err(|e| format!("Could not install Python dependencies.\n\n{e}"))?;
@@ -143,14 +150,207 @@ async fn ensure_venv(
     Ok(python)
 }
 
+// ── Auto-updater ──────────────────────────────────────────────────────────────
+
+async fn background_check_update(handle: tauri::AppHandle) {
+    let updater = match handle.updater() {
+        Ok(u) => u,
+        Err(e) => { eprintln!("[updater] disabled: {e}"); return; }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            eprintln!("[updater] new version: {version}");
+            *handle.state::<UpdateState>().pending.lock().unwrap() = Some(update);
+            if let Some(win) = handle.get_webview_window("main") {
+                let v = version.replace('"', "\\\"");
+                let _ = win.eval(&format!(
+                    r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
+                ));
+            }
+        }
+        Ok(None) => eprintln!("[updater] up to date"),
+        Err(e) => eprintln!("[updater] check failed: {e}"),
+    }
+}
+
+#[tauri::command]
+async fn check_update(
+    handle: tauri::AppHandle,
+    state: tauri::State<'_, UpdateState>,
+) -> Result<Option<String>, String> {
+    let updater = handle.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            *state.pending.lock().unwrap() = Some(update);
+            Ok(Some(version))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn install_update(
+    handle: tauri::AppHandle,
+    state: tauri::State<'_, UpdateState>,
+) -> Result<(), String> {
+    let update = state
+        .pending
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "No pending update".to_string())?;
+
+    update
+        .download_and_install(
+            |chunk, total| { if let Some(t) = total { eprintln!("[updater] {chunk}/{t}"); } },
+            || eprintln!("[updater] installing…"),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    handle.restart();
+}
+
+// ── System tray ───────────────────────────────────────────────────────────────
+
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+
+    let open = MenuItemBuilder::with_id("open", "Open Hermes").build(app)?;
+    let check_update = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&open, &check_update, &sep, &quit])
+        .build()?;
+
+    TrayIconBuilder::with_id("main")
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .tooltip("Hermes WebUI Desktop")
+        .on_menu_event({
+            let handle = app.handle().clone();
+            move |_tray, event| {
+                let h = handle.clone();
+                match event.id().as_ref() {
+                    "open" => show_window(&h),
+                    "quit" => {
+                        // Kill Python server before exit
+                        if let Some(c) = h.state::<ServerState>().child.lock().unwrap().take() {
+                            let _ = c.kill();
+                        }
+                        h.exit(0);
+                    }
+                    "check_update" => {
+                        tauri::async_runtime::spawn(async move {
+                            let state = h.state::<UpdateState>();
+                            match check_update(h.clone(), state).await {
+                                Ok(Some(version)) => {
+                                    if let Some(win) = h.get_webview_window("main") {
+                                        show_window(&h);
+                                        let v = version.replace('"', "\\\"");
+                                        let _ = win.eval(&format!(
+                                            r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
+                                        ));
+                                    }
+                                }
+                                Ok(None) => eprintln!("[updater] up to date"),
+                                Err(e) => eprintln!("[updater] check error: {e}"),
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .on_tray_icon_event({
+            let handle = app.handle().clone();
+            move |_tray, event| {
+                // Left-click / double-click → show window (works on macOS & Windows)
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_window(&handle);
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
+// ── Menu bar ──────────────────────────────────────────────────────────────────
+
+fn build_menu(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let check_item = MenuItemBuilder::with_id("check_update", "Check for Updates…").build(app)?;
+    let help = SubmenuBuilder::new(app, "Help").item(&check_item).build()?;
+    let menu = MenuBuilder::new(app).items(&[&help]).build()?;
+    app.set_menu(menu)?;
+
+    let handle = app.handle().clone();
+    app.on_menu_event(move |_app, event| {
+        if event.id() == "check_update" {
+            let h = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = h.state::<UpdateState>();
+                match check_update(h.clone(), state).await {
+                    Ok(Some(version)) => {
+                        if let Some(win) = h.get_webview_window("main") {
+                            let v = version.replace('"', "\\\"");
+                            let _ = win.eval(&format!(
+                                r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        if let Some(win) = h.get_webview_window("main") {
+                            let _ = win.eval(r#"alert("You're up to date!")"#);
+                        }
+                    }
+                    Err(e) => eprintln!("[updater] manual check failed: {e}"),
+                }
+            });
+        }
+    });
+
+    Ok(())
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single instance must be first
+        .plugin(
+            tauri_plugin_single_instance::Builder::new()
+                .callback(|handle, _args, _cwd| {
+                    // Second launch attempt → focus existing window
+                    show_window(handle);
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
-        .manage(ServerState {
-            child: Mutex::new(None),
-        })
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(ServerState { child: Mutex::new(None) })
+        .manage(UpdateState { pending: Mutex::new(None) })
+        .invoke_handler(tauri::generate_handler![check_update, install_update])
         .setup(|app| {
+            build_tray(app)?;
+            build_menu(app)?;
+
             let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -159,9 +359,10 @@ pub fn run() {
             .title("Hermes")
             .inner_size(1400.0, 900.0)
             .min_inner_size(900.0, 600.0)
+            // Restore previous size/position
+            .restore_state(tauri_plugin_window_state::StateFlags::all())
             .build()?;
 
-            // Auto-allow microphone/camera permission prompts on Linux.
             #[cfg(target_os = "linux")]
             {
                 use webkit2gtk::{PermissionRequestExt, WebViewExt};
@@ -174,70 +375,55 @@ pub fn run() {
             }
 
             let handle = app.handle().clone();
-            let resource_dir = app
-                .path()
-                .resource_dir()
-                .expect("could not resolve resource dir");
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("could not resolve app data dir");
+            let resource_dir = app.path().resource_dir().expect("resource dir");
+            let app_data_dir = app.path().app_data_dir().expect("app data dir");
+
+            // Update check runs in parallel with server startup
+            let update_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                background_check_update(update_handle).await;
+            });
 
             tauri::async_runtime::spawn(async move {
                 set_status(&handle, "Checking Python environment…");
 
                 let python = match ensure_venv(&handle, &resource_dir, &app_data_dir).await {
                     Ok(p) => p,
-                    Err(e) => {
-                        std::thread::sleep(Duration::from_millis(400));
-                        show_error(&handle, &e);
-                        return;
-                    }
+                    Err(e) => { show_error(&handle, &e); return; }
                 };
 
                 let port = free_port();
-                let port_str = port.to_string();
                 let server_py = resource_dir.join("server.py");
 
-                eprintln!("[hermes] python = {}", python.display());
-                eprintln!("[hermes] server = {}", server_py.display());
-                eprintln!("[hermes] port   = {port}");
-
                 if !server_py.exists() {
-                    show_error(
-                        &handle,
-                        &format!("server.py not found:\n{}", server_py.display()),
-                    );
+                    show_error(&handle, &format!("server.py not found:\n{}", server_py.display()));
                     return;
                 }
 
                 set_status(&handle, "Starting server…");
 
-                // On Unix we clear PYTHONHOME/PYTHONPATH that an AppImage runtime
-                // might inject — they interfere with a standalone Python interpreter.
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
                         .command(python.to_str().unwrap())
                         .arg(server_py.to_str().unwrap())
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
-                        .env("HERMES_WEBUI_PORT", &port_str)
+                        .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
                         .spawn()
                 } else {
-                    let sh_cmd = format!(
-                        "unset PYTHONHOME PYTHONPATH; exec '{}' '{}'",
-                        python.display(),
-                        server_py.display()
-                    );
                     handle
                         .shell()
                         .command("sh")
                         .arg("-c")
-                        .arg(sh_cmd)
+                        .arg(format!(
+                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}'",
+                            python.display(),
+                            server_py.display()
+                        ))
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
-                        .env("HERMES_WEBUI_PORT", &port_str)
+                        .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
                         .spawn()
@@ -245,15 +431,11 @@ pub fn run() {
 
                 let (mut rx, child) = match spawn_result {
                     Ok(v) => v,
-                    Err(e) => {
-                        show_error(&handle, &format!("Could not launch Python server:\n{e}"));
-                        return;
-                    }
+                    Err(e) => { show_error(&handle, &format!("Could not launch server:\n{e}")); return; }
                 };
 
                 *handle.state::<ServerState>().child.lock().unwrap() = Some(child);
 
-                // Drain server stdout/stderr to the terminal.
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
@@ -278,8 +460,7 @@ pub fn run() {
                 if ready {
                     eprintln!("[hermes] server ready on :{port}");
                     if let Some(win) = handle.get_webview_window("main") {
-                        let url = format!("http://{SERVER_HOST}:{port}");
-                        let _ = win.eval(&format!("window.location='{url}'"));
+                        let _ = win.eval(&format!("window.location='http://{SERVER_HOST}:{port}'"));
                     }
                 } else {
                     show_error(
@@ -294,19 +475,25 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                let child = window
+        .on_window_event(|window, event| match event {
+            // Intercept close — hide to tray instead of quitting
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            tauri::WindowEvent::Destroyed => {
+                if let Some(c) = window
                     .app_handle()
                     .state::<ServerState>()
                     .child
                     .lock()
                     .unwrap()
-                    .take();
-                if let Some(c) = child {
+                    .take()
+                {
                     let _ = c.kill();
                 }
             }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error running tauri application");

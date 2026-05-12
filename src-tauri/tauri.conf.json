@@ -1,16 +1,24 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hermes WebUI Desktop",
+  "productName": "hermes-webui-desktop",
   "version": "0.1.0",
   "identifier": "com.tuan3w.hermes-webui-desktop",
   "build": {
     "frontendDist": "../desktop"
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "security": {
       "csp": null,
       "dangerousDisableAssetCspModification": true
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER_REPLACE_WITH_YOUR_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/tuan3w/hermes-webui-desktop/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
@@ -19,7 +27,9 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/512x512.png"
+      "icons/256x256.png",
+      "icons/512x512.png",
+      "icons/icon.png"
     ],
     "externalBin": [
       "binaries/uv"

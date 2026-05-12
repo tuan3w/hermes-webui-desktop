@@ -40,6 +40,58 @@
       border-radius: 6px;
       border: 1px solid #3d1a1a;
     }
+    #update-banner {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 14px 20px;
+      min-width: 320px;
+      max-width: 480px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #update-banner.visible { display: flex; }
+    .update-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #e6edf3;
+    }
+    .update-subtitle {
+      font-size: 0.8rem;
+      color: #8b949e;
+    }
+    .update-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary {
+      background: #238636;
+      color: #fff;
+    }
+    .btn-secondary {
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+    }
+    .btn:disabled { opacity: 0.5; cursor: default; }
   </style>
 </head>
 <body>
@@ -48,16 +100,50 @@
     Starting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
   </div>
   <div id="error"></div>
+
+  <div id="update-banner">
+    <div class="update-title" id="update-title">New version available</div>
+    <div class="update-subtitle" id="update-subtitle">Install now and restart to apply the update.</div>
+    <div class="update-actions">
+      <button class="btn btn-secondary" id="btn-later" onclick="dismissUpdate()">Later</button>
+      <button class="btn btn-primary" id="btn-install" onclick="installUpdate()">Install &amp; Restart</button>
+    </div>
+  </div>
+
   <script>
     window.__hermesSetStatus = function(msg) {
       document.getElementById('status').textContent = msg;
     };
+
     window.__hermesShowError = function(msg) {
       document.getElementById('status').style.display = 'none';
       const el = document.getElementById('error');
       el.textContent = msg;
       el.style.display = 'block';
     };
+
+    window.__hermesShowUpdate = function(version) {
+      document.getElementById('update-title').textContent =
+        'Update available: v' + version;
+      document.getElementById('update-banner').classList.add('visible');
+    };
+
+    function dismissUpdate() {
+      document.getElementById('update-banner').classList.remove('visible');
+    }
+
+    async function installUpdate() {
+      const btn = document.getElementById('btn-install');
+      btn.disabled = true;
+      btn.textContent = 'Installing…';
+      try {
+        await window.__TAURI__.core.invoke('install_update');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Install & Restart';
+        document.getElementById('update-subtitle').textContent = 'Error: ' + e;
+      }
+    }
   </script>
 </body>
 </html>
