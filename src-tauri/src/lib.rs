@@ -519,20 +519,25 @@ pub fn run() {
                 let _ = window.hide();
             }
             tauri::WindowEvent::Resized(physical_size) => {
-                let h = window.app_handle();
                 let phy_w = physical_size.width;
                 let phy_h = physical_size.height;
+                if phy_w == 0 {
+                    return; // minimized — skip layout
+                }
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let strip_phys = (36.0 * scale).round() as u32;
+                let h = window.app_handle();
                 if let Some(strip) = h.get_webview("strip") {
                     let _ = strip.set_bounds(tauri::Rect {
                         position: tauri::Position::Physical(tauri::PhysicalPosition::new(0, 0)),
-                        size: tauri::Size::Physical(tauri::PhysicalSize::new(36, phy_h)),
+                        size: tauri::Size::Physical(tauri::PhysicalSize::new(strip_phys, phy_h)),
                     });
                 }
                 if let Some(hermes_wv) = h.get_webview("hermes") {
                     let _ = hermes_wv.set_bounds(tauri::Rect {
-                        position: tauri::Position::Physical(tauri::PhysicalPosition::new(36, 0)),
+                        position: tauri::Position::Physical(tauri::PhysicalPosition::new(strip_phys as i32, 0)),
                         size: tauri::Size::Physical(tauri::PhysicalSize::new(
-                            phy_w.saturating_sub(36),
+                            phy_w.saturating_sub(strip_phys),
                             phy_h,
                         )),
                     });
