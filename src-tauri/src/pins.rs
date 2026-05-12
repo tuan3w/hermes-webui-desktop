@@ -53,14 +53,21 @@ impl PinsState {
 }
 
 fn sanitize_label(url: &str) -> String {
-    url.chars()
+    // FNV-1a hash, no extra deps needed
+    let hash: u32 = url.bytes().fold(2166136261u32, |h, b| {
+        h.wrapping_mul(16777619) ^ (b as u32)
+    });
+    let prefix: String = url
+        .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
         .collect::<String>()
         .trim_matches('-')
         .chars()
-        .take(32)
+        .take(26) // 26 + 1 dash + 4 hex = 31 chars, within 32
         .collect::<String>()
-        .to_lowercase()
+        .to_lowercase();
+    let prefix = if prefix.is_empty() { "pin".to_string() } else { prefix };
+    format!("{}-{:04x}", prefix, hash & 0xFFFF)
 }
 
 #[tauri::command]
@@ -76,8 +83,10 @@ pub fn add_pin(
     label: String,
 ) -> Result<(), String> {
     let mut pins = state.pins.lock().unwrap();
-    add_pin_to_list(&mut pins, url, label);
-    write_pins(&state.path, &pins)?;
+    let mut new_pins = pins.clone();
+    add_pin_to_list(&mut new_pins, url, label);
+    write_pins(&state.path, &new_pins)?; // fail before touching the real Vec
+    *pins = new_pins;
     drop(pins);
     let _ = handle.emit("pins-updated", ());
     Ok(())
@@ -90,15 +99,17 @@ pub fn remove_pin(
     url: String,
 ) -> Result<(), String> {
     let mut pins = state.pins.lock().unwrap();
-    remove_pin_from_list(&mut pins, &url);
-    write_pins(&state.path, &pins)?;
+    let mut new_pins = pins.clone();
+    remove_pin_from_list(&mut new_pins, &url);
+    write_pins(&state.path, &new_pins)?; // fail before touching the real Vec
+    *pins = new_pins;
     drop(pins);
     let _ = handle.emit("pins-updated", ());
     Ok(())
 }
 
 #[tauri::command]
-pub async fn open_pin(
+pub fn open_pin(
     handle: tauri::AppHandle,
     url: String,
     label: String,
