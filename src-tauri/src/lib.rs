@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
+use tauri::webview::WebviewBuilder;
+use tauri::window::WindowBuilder;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -49,7 +51,7 @@ fn venv_python(venv_dir: &Path) -> PathBuf {
 }
 
 fn show_window(handle: &tauri::AppHandle) {
-    if let Some(win) = handle.get_webview_window("main") {
+    if let Some(win) = handle.get_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
         let _ = win.unminimize();
@@ -58,8 +60,8 @@ fn show_window(handle: &tauri::AppHandle) {
 
 fn set_status(handle: &tauri::AppHandle, msg: &str) {
     let esc = msg.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-    if let Some(win) = handle.get_webview_window("main") {
-        let _ = win.eval(&format!(
+    if let Some(wv) = handle.get_webview("hermes") {
+        let _ = wv.eval(&format!(
             r#"window.__hermesSetStatus && window.__hermesSetStatus("{esc}")"#
         ));
     }
@@ -68,8 +70,8 @@ fn set_status(handle: &tauri::AppHandle, msg: &str) {
 fn show_error(handle: &tauri::AppHandle, msg: &str) {
     eprintln!("[hermes] ERROR: {msg}");
     let esc = msg.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-    if let Some(win) = handle.get_webview_window("main") {
-        let _ = win.eval(&format!(
+    if let Some(wv) = handle.get_webview("hermes") {
+        let _ = wv.eval(&format!(
             r#"window.__hermesShowError && window.__hermesShowError("{esc}")"#
         ));
     }
@@ -164,9 +166,9 @@ async fn background_check_update(handle: tauri::AppHandle) {
             let version = update.version.clone();
             eprintln!("[updater] new version: {version}");
             *handle.state::<UpdateState>().pending.lock().unwrap() = Some(update);
-            if let Some(win) = handle.get_webview_window("main") {
+            if let Some(wv) = handle.get_webview("hermes") {
                 let v = version.replace('"', "\\\"");
-                let _ = win.eval(&format!(
+                let _ = wv.eval(&format!(
                     r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
                 ));
             }
@@ -177,8 +179,10 @@ async fn background_check_update(handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn open_devtools(window: tauri::WebviewWindow) {
-    window.open_devtools();
+fn open_devtools(handle: tauri::AppHandle) {
+    if let Some(wv) = handle.get_webview("hermes") {
+        wv.open_devtools();
+    }
 }
 
 #[tauri::command]
@@ -271,10 +275,10 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                             let state = h.state::<UpdateState>();
                             match check_update(h.clone(), state).await {
                                 Ok(Some(version)) => {
-                                    if let Some(win) = h.get_webview_window("main") {
+                                    if let Some(wv) = h.get_webview("hermes") {
                                         show_window(&h);
                                         let v = version.replace('"', "\\\"");
-                                        let _ = win.eval(&format!(
+                                        let _ = wv.eval(&format!(
                                             r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
                                         ));
                                     }
@@ -327,24 +331,42 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(ServerState { child: Mutex::new(None) })
         .manage(UpdateState { pending: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![open_devtools, check_update, install_update])
+        .invoke_handler(tauri::generate_handler![
+            open_devtools,
+            check_update,
+            install_update,
+            pins::list_pins,
+            pins::add_pin,
+            pins::remove_pin,
+            pins::open_pin,
+        ])
         .setup(|app| {
             build_tray(app)?;
 
-            let window = tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::App("/".into()),
-            )
-            .title("Hermes")
-            .inner_size(1400.0, 900.0)
-            .min_inner_size(900.0, 600.0)
-            .build()?;
+            let window = WindowBuilder::new(app, "main")
+                .title("Hermes")
+                .inner_size(1436.0, 900.0)
+                .min_inner_size(936.0, 600.0)
+                .build()?;
+
+            // Strip webview — left 36px, always visible
+            window.add_child(
+                WebviewBuilder::new("strip", tauri::WebviewUrl::App("strip.html".into())),
+                tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(36.0, 900.0)),
+            )?;
+
+            // Hermes webview — fills rest, starts with splash screen
+            let hermes_wv = window.add_child(
+                WebviewBuilder::new("hermes", tauri::WebviewUrl::App("/".into())),
+                tauri::Position::Logical(tauri::LogicalPosition::new(36.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(1400.0, 900.0)),
+            )?;
 
             #[cfg(target_os = "linux")]
             {
                 use webkit2gtk::{PermissionRequestExt, WebViewExt};
-                let _ = window.with_webview(|wv| {
+                let _ = hermes_wv.with_webview(|wv| {
                     wv.inner().connect_permission_request(|_, req| {
                         req.allow();
                         true
@@ -355,6 +377,9 @@ pub fn run() {
             let handle = app.handle().clone();
             let resource_dir = app.path().resource_dir().expect("resource dir");
             let app_data_dir = app.path().app_data_dir().expect("app data dir");
+
+            let pins_path = app_data_dir.join("pins.json");
+            app.manage(pins::PinsState::load(pins_path));
 
             // Update check runs in parallel with server startup
             let update_handle = handle.clone();
@@ -442,8 +467,8 @@ pub fn run() {
                                             .replace('\\', "\\\\")
                                             .replace('"', "\\\"")
                                             .replace('\n', "\\n");
-                                        if let Some(win) = handle_log.get_webview_window("main") {
-                                            let _ = win.eval(&format!(
+                                        if let Some(wv) = handle_log.get_webview("hermes") {
+                                            let _ = wv.eval(&format!(
                                                 r#"window.__hermesAppendLog && window.__hermesAppendLog("{esc}", false)"#
                                             ));
                                         }
@@ -466,8 +491,8 @@ pub fn run() {
 
                 if ready {
                     eprintln!("[hermes] server ready on :{port}");
-                    if let Some(win) = handle.get_webview_window("main") {
-                        let _ = win.eval(&format!("window.location='http://{SERVER_HOST}:{port}'"));
+                    if let Some(wv) = handle.get_webview("hermes") {
+                        let _ = wv.eval(&format!("window.location='http://{SERVER_HOST}:{port}'"));
                     }
                 } else {
                     let tail = log_buf.lock().unwrap().join("\n");
@@ -492,6 +517,26 @@ pub fn run() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
+            }
+            tauri::WindowEvent::Resized(physical_size) => {
+                let h = window.app_handle();
+                let phy_w = physical_size.width;
+                let phy_h = physical_size.height;
+                if let Some(strip) = h.get_webview("strip") {
+                    let _ = strip.set_bounds(tauri::Rect {
+                        position: tauri::Position::Physical(tauri::PhysicalPosition::new(0, 0)),
+                        size: tauri::Size::Physical(tauri::PhysicalSize::new(36, phy_h)),
+                    });
+                }
+                if let Some(hermes_wv) = h.get_webview("hermes") {
+                    let _ = hermes_wv.set_bounds(tauri::Rect {
+                        position: tauri::Position::Physical(tauri::PhysicalPosition::new(36, 0)),
+                        size: tauri::Size::Physical(tauri::PhysicalSize::new(
+                            phy_w.saturating_sub(36),
+                            phy_h,
+                        )),
+                    });
+                }
             }
             tauri::WindowEvent::Destroyed => {
                 if let Some(c) = window
