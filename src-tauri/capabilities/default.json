@@ -3,7 +3,7 @@
   "identifier": "default",
   "description": "Default capabilities for the Hermes desktop app",
   "local": true,
-  "windows": ["main"],
+  "windows": ["hermes"],
   "permissions": [
     "core:default",
     "shell:allow-execute",
