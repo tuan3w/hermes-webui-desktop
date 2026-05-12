@@ -1,0 +1,155 @@
+name: Build & Release Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: true
+        description: Build artifacts but skip publishing the GitHub Release
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release
+  cancel-in-progress: true
+
+jobs:
+  # ── Linux ────────────────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            imagemagick curl
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Generate icons
+        run: bash scripts/build-desktop.sh --icons-only 2>/dev/null || bash -c '
+          src=hermes-webui/static/favicon-512.png
+          convert "$src" -resize 32x32   src-tauri/icons/32x32.png
+          convert "$src" -resize 128x128 src-tauri/icons/128x128.png
+          cp "$src" src-tauri/icons/512x512.png'
+
+      - name: Build (deb + AppImage)
+        run: cd src-tauri && cargo tauri build --bundles deb,appimage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+
+  # ── macOS ────────────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: macos-${{ matrix.arch }}
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Generate icons
+        run: |
+          src=hermes-webui/static/favicon-512.png
+          sips -z 32   32   "$src" --out src-tauri/icons/32x32.png
+          sips -z 128  128  "$src" --out src-tauri/icons/128x128.png
+          cp "$src" src-tauri/icons/512x512.png
+
+      - name: Build (dmg)
+        run: |
+          cd src-tauri
+          cargo tauri build --bundles dmg --target ${{ matrix.arch }}-apple-darwin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-artifacts
+          path: src-tauri/target/${{ matrix.arch }}-apple-darwin/release/bundle/**/*.dmg
+
+  # ── Windows ──────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Generate icons
+        shell: pwsh
+        run: |
+          $src = "hermes-webui\static\favicon-512.png"
+          Copy-Item $src src-tauri\icons\32x32.png
+          Copy-Item $src src-tauri\icons\128x128.png
+          Copy-Item $src src-tauri\icons\512x512.png
+
+      - name: Build (nsis installer)
+        run: cd src-tauri && cargo tauri build --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: src-tauri/target/release/bundle/**/*.exe
+
+  # ── Publish GitHub Release ───────────────────────────────────────────────────
+  publish:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.ref, 'refs/tags/v') &&
+      github.event.inputs.dry_run != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*

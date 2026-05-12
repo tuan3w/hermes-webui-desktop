@@ -1,0 +1,313 @@
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+use tauri::Manager;
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+
+const SERVER_HOST: &str = "127.0.0.1";
+const UV_PYTHON: &str = "3.11";
+
+struct ServerState {
+    child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind((SERVER_HOST, 0))
+        .expect("could not bind to find a free port")
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn wait_for_server(port: u16) -> bool {
+    for _ in 0..120 {
+        if TcpStream::connect((SERVER_HOST, port)).is_ok() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
+/// Path to the Python interpreter inside a uv-managed venv.
+fn venv_python(venv_dir: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python")
+    }
+}
+
+fn set_status(handle: &tauri::AppHandle, msg: &str) {
+    let esc = msg.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.eval(&format!(
+            r#"window.__hermesSetStatus && window.__hermesSetStatus("{esc}")"#
+        ));
+    }
+}
+
+fn show_error(handle: &tauri::AppHandle, msg: &str) {
+    eprintln!("[hermes] ERROR: {msg}");
+    let esc = msg.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.eval(&format!(
+            r#"window.__hermesShowError && window.__hermesShowError("{esc}")"#
+        ));
+    }
+}
+
+/// Run a uv sub-command, stream its output to the splash status, wait for completion.
+async fn run_uv(handle: &tauri::AppHandle, args: &[&str]) -> Result<(), String> {
+    let (mut rx, _child) = handle
+        .shell()
+        .sidecar("uv")
+        .map_err(|e| format!("uv sidecar unavailable: {e}\nRun `cargo build` to download it."))?
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn uv: {e}"))?;
+
+    let mut output = String::new();
+
+    loop {
+        match rx.recv().await {
+            Some(CommandEvent::Stdout(b)) | Some(CommandEvent::Stderr(b)) => {
+                if let Ok(s) = std::str::from_utf8(&b) {
+                    eprint!("[uv] {s}");
+                    output.push_str(s);
+                    if let Some(line) = s.lines().filter(|l| !l.trim().is_empty()).last() {
+                        set_status(handle, line.trim());
+                    }
+                }
+            }
+            Some(CommandEvent::Terminated(status)) => {
+                return if status.code == Some(0) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "uv {} failed (exit {:?})\n{}",
+                        args.first().unwrap_or(&""),
+                        status.code,
+                        output.trim()
+                    ))
+                };
+            }
+            None => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
+/// Create the venv and install requirements if they don't exist yet.
+/// Returns the path to the venv Python interpreter.
+async fn ensure_venv(
+    handle: &tauri::AppHandle,
+    resource_dir: &Path,
+    app_data_dir: &Path,
+) -> Result<PathBuf, String> {
+    let venv_dir = app_data_dir.join("venv");
+    let python = venv_python(&venv_dir);
+
+    if python.exists() {
+        eprintln!("[hermes] venv OK: {}", venv_dir.display());
+        return Ok(python);
+    }
+
+    std::fs::create_dir_all(app_data_dir)
+        .map_err(|e| format!("Cannot create app data dir: {e}"))?;
+
+    set_status(handle, "Setting up Python environment (first launch)…");
+    eprintln!("[hermes] Creating venv at {}", venv_dir.display());
+
+    run_uv(handle, &["venv", "--python", UV_PYTHON, venv_dir.to_str().unwrap()])
+        .await
+        .map_err(|e| format!("Could not create Python environment.\n\n{e}"))?;
+
+    let req = resource_dir.join("requirements.txt");
+    set_status(handle, "Installing Python dependencies…");
+    eprintln!("[hermes] Installing {}", req.display());
+
+    run_uv(
+        handle,
+        &[
+            "pip", "install",
+            "-r", req.to_str().unwrap(),
+            "--python", python.to_str().unwrap(),
+        ],
+    )
+    .await
+    .map_err(|e| format!("Could not install Python dependencies.\n\n{e}"))?;
+
+    Ok(python)
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .manage(ServerState {
+            child: Mutex::new(None),
+        })
+        .setup(|app| {
+            let window = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("/".into()),
+            )
+            .title("Hermes")
+            .inner_size(1400.0, 900.0)
+            .min_inner_size(900.0, 600.0)
+            .build()?;
+
+            // Auto-allow microphone/camera permission prompts on Linux.
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::{PermissionRequestExt, WebViewExt};
+                let _ = window.with_webview(|wv| {
+                    wv.inner().connect_permission_request(|_, req| {
+                        req.allow();
+                        true
+                    });
+                });
+            }
+
+            let handle = app.handle().clone();
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .expect("could not resolve resource dir");
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("could not resolve app data dir");
+
+            tauri::async_runtime::spawn(async move {
+                set_status(&handle, "Checking Python environment…");
+
+                let python = match ensure_venv(&handle, &resource_dir, &app_data_dir).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        std::thread::sleep(Duration::from_millis(400));
+                        show_error(&handle, &e);
+                        return;
+                    }
+                };
+
+                let port = free_port();
+                let port_str = port.to_string();
+                let server_py = resource_dir.join("server.py");
+
+                eprintln!("[hermes] python = {}", python.display());
+                eprintln!("[hermes] server = {}", server_py.display());
+                eprintln!("[hermes] port   = {port}");
+
+                if !server_py.exists() {
+                    show_error(
+                        &handle,
+                        &format!("server.py not found:\n{}", server_py.display()),
+                    );
+                    return;
+                }
+
+                set_status(&handle, "Starting server…");
+
+                // On Unix we clear PYTHONHOME/PYTHONPATH that an AppImage runtime
+                // might inject — they interfere with a standalone Python interpreter.
+                let spawn_result = if cfg!(windows) {
+                    handle
+                        .shell()
+                        .command(python.to_str().unwrap())
+                        .arg(server_py.to_str().unwrap())
+                        .env("HERMES_WEBUI_HOST", SERVER_HOST)
+                        .env("HERMES_WEBUI_PORT", &port_str)
+                        .env("PYTHONDONTWRITEBYTECODE", "1")
+                        .current_dir(&resource_dir)
+                        .spawn()
+                } else {
+                    let sh_cmd = format!(
+                        "unset PYTHONHOME PYTHONPATH; exec '{}' '{}'",
+                        python.display(),
+                        server_py.display()
+                    );
+                    handle
+                        .shell()
+                        .command("sh")
+                        .arg("-c")
+                        .arg(sh_cmd)
+                        .env("HERMES_WEBUI_HOST", SERVER_HOST)
+                        .env("HERMES_WEBUI_PORT", &port_str)
+                        .env("PYTHONDONTWRITEBYTECODE", "1")
+                        .current_dir(&resource_dir)
+                        .spawn()
+                };
+
+                let (mut rx, child) = match spawn_result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        show_error(&handle, &format!("Could not launch Python server:\n{e}"));
+                        return;
+                    }
+                };
+
+                *handle.state::<ServerState>().child.lock().unwrap() = Some(child);
+
+                // Drain server stdout/stderr to the terminal.
+                tauri::async_runtime::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                                if let Ok(line) = std::str::from_utf8(&b) {
+                                    eprint!("[server] {line}");
+                                }
+                            }
+                            CommandEvent::Terminated(s) => {
+                                eprintln!("[hermes] server exited: {:?}", s.code);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+                let ready = tauri::async_runtime::spawn_blocking(move || wait_for_server(port))
+                    .await
+                    .unwrap_or(false);
+
+                if ready {
+                    eprintln!("[hermes] server ready on :{port}");
+                    if let Some(win) = handle.get_webview_window("main") {
+                        let url = format!("http://{SERVER_HOST}:{port}");
+                        let _ = win.eval(&format!("window.location='{url}'"));
+                    }
+                } else {
+                    show_error(
+                        &handle,
+                        &format!(
+                            "Server did not respond on :{port} within 60 s.\n\
+                             Run from a terminal to see the full error output."
+                        ),
+                    );
+                }
+            });
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let child = window
+                    .app_handle()
+                    .state::<ServerState>()
+                    .child
+                    .lock()
+                    .unwrap()
+                    .take();
+                if let Some(c) = child {
+                    let _ = c.kill();
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("error running tauri application");
+}
