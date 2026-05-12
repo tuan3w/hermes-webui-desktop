@@ -351,20 +351,28 @@ pub fn run() {
                 };
 
                 let port = free_port();
-                let server_py = resource_dir.join("server.py");
+                let bootstrap_py = resource_dir.join("bootstrap.py");
 
-                if !server_py.exists() {
-                    show_error(&handle, &format!("server.py not found:\n{}", server_py.display()));
+                if !bootstrap_py.exists() {
+                    show_error(&handle, &format!("bootstrap.py not found:\n{}", bootstrap_py.display()));
                     return;
                 }
 
                 set_status(&handle, "Starting server…");
 
+                // Launch bootstrap.py --foreground --skip-agent-install.
+                // bootstrap.py discovers HERMES_WEBUI_AGENT_DIR from env vars
+                // and common paths (~/.hermes/hermes-agent, ~/hermes-agent, etc.),
+                // then execs into server.py with the correct env set up.
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
                         .command(python.to_str().unwrap())
-                        .arg(server_py.to_str().unwrap())
+                        .args([
+                            bootstrap_py.to_str().unwrap(),
+                            "--foreground",
+                            "--skip-agent-install",
+                        ])
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("PYTHONDONTWRITEBYTECODE", "1")
@@ -376,9 +384,9 @@ pub fn run() {
                         .command("sh")
                         .arg("-c")
                         .arg(format!(
-                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}'",
+                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground --skip-agent-install",
                             python.display(),
-                            server_py.display()
+                            bootstrap_py.display()
                         ))
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
