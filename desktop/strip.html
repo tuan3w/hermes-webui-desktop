@@ -36,6 +36,8 @@
     transition: background 0.1s;
   }
   .pin:hover { background: #3a3a5a; border-color: #4a4aaa; }
+  .pin.removing { background: #4a1010; border-color: #f87171; color: #f87171; }
+  .pin.removing:hover { background: #5a1515; border-color: #ff9999; }
 
   .spacer { flex: 1; }
 
@@ -56,21 +58,7 @@
   }
   .add-btn:hover { border-color: #8ab4f8; color: #8ab4f8; }
 
-  #ctx-menu {
-    position: fixed;
-    background: #1e1e2e;
-    border: 1px solid #444;
-    border-radius: 6px;
-    padding: 4px 0;
-    font-family: system-ui, sans-serif;
-    font-size: 12px;
-    display: none;
-    z-index: 1000;
-    min-width: 100px;
-  }
-  #ctx-menu .item { padding: 6px 12px; cursor: pointer; color: #ccc; }
-  #ctx-menu .item:hover { background: #333; }
-  #ctx-menu .item.danger { color: #f87171; }
+  #ctx-menu { display: none; }
 
   #popover {
     position: fixed;
@@ -132,42 +120,90 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-let ctxTarget = null;
+// Track which pin element is currently in "confirm remove" mode
+let removingEl = null;
 
-async function loadPins() {
-  const pins = await invoke('list_pins');
-  const container = document.getElementById('pins');
-  container.innerHTML = '';
-  for (const pin of pins) {
-    const el = document.createElement('div');
-    el.className = 'pin';
-    el.textContent = pin.label.charAt(0).toUpperCase();
-    el.title = pin.label + '\n' + pin.url;
-    el.addEventListener('click', () => invoke('open_pin', { url: pin.url, label: pin.label }));
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      ctxTarget = pin.url;
-      const menu = document.getElementById('ctx-menu');
-      menu.style.display = 'block';
-      menu.style.left = '40px';
-      menu.style.top = Math.min(e.clientY, window.innerHeight - 60) + 'px';
-    });
-    container.appendChild(el);
+function cancelRemoveMode() {
+  if (removingEl) {
+    removingEl.classList.remove('removing');
+    removingEl.dataset.originalText && (removingEl.textContent = removingEl.dataset.originalText);
+    removingEl = null;
   }
 }
 
-document.addEventListener('click', () => {
-  document.getElementById('ctx-menu').style.display = 'none';
-});
+async function loadPins() {
+  try {
+    const pins = await invoke('list_pins');
+    const container = document.getElementById('pins');
+    container.innerHTML = '';
+    removingEl = null;
+    for (const pin of pins) {
+      const el = document.createElement('div');
+      el.className = 'pin';
+      const letter = pin.label.charAt(0).toUpperCase();
+      el.textContent = letter;
+      el.dataset.originalText = letter;
+      el.title = pin.label + '\n' + pin.url;
 
-document.getElementById('ctx-remove').addEventListener('click', async () => {
-  if (!ctxTarget) return;
-  await invoke('remove_pin', { url: ctxTarget });
-  ctxTarget = null;
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        // If this pin is in remove-confirm mode, confirm the removal
+        if (el.classList.contains('removing')) {
+          try {
+            await invoke('remove_pin', { url: pin.url });
+            // loadPins is triggered by pins-updated event from backend,
+            // but call it directly too for immediate feedback
+            loadPins();
+          } catch (err) {
+            console.error('remove_pin failed:', err);
+            // Do NOT clear removingEl — pin stays visible and remove mode stays active
+          }
+          return;
+        }
+        // Cancel any other pin in remove mode first
+        cancelRemoveMode();
+        // Normal open
+        try {
+          await invoke('open_pin', { url: pin.url, label: pin.label });
+        } catch (err) {
+          console.error('open_pin failed:', err);
+        }
+      });
+
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (el.classList.contains('removing')) {
+          // Right-click again cancels remove mode
+          cancelRemoveMode();
+          return;
+        }
+        // Cancel any previously active remove mode
+        cancelRemoveMode();
+        // Enter remove-confirm mode: turn pin red and show ×
+        el.dataset.originalText = el.textContent;
+        el.classList.add('removing');
+        el.textContent = '×';
+        removingEl = el;
+      });
+
+      container.appendChild(el);
+    }
+  } catch (err) {
+    console.error('loadPins failed:', err);
+    // Render empty — do not crash
+    document.getElementById('pins').innerHTML = '';
+  }
+}
+
+// Clicking anywhere outside a pin cancels remove mode
+document.addEventListener('click', () => {
+  cancelRemoveMode();
 });
 
 document.getElementById('add-btn').addEventListener('click', (e) => {
   e.stopPropagation();
+  cancelRemoveMode();
   const pop = document.getElementById('popover');
   pop.style.display = pop.style.display === 'block' ? 'none' : 'block';
   if (pop.style.display === 'block') document.getElementById('pop-url').focus();
@@ -184,10 +220,15 @@ document.getElementById('pop-confirm').addEventListener('click', async () => {
   const rawLabel = document.getElementById('pop-label').value.trim();
   if (!url) return;
   const label = rawLabel || (() => { try { return new URL(url).hostname; } catch { return url; } })();
-  await invoke('add_pin', { url, label });
-  document.getElementById('popover').style.display = 'none';
-  document.getElementById('pop-url').value = '';
-  document.getElementById('pop-label').value = '';
+  try {
+    await invoke('add_pin', { url, label });
+    document.getElementById('popover').style.display = 'none';
+    document.getElementById('pop-url').value = '';
+    document.getElementById('pop-label').value = '';
+  } catch (err) {
+    console.error('add_pin failed:', err);
+    // Keep popover open with user's input intact — do not clear fields
+  }
 });
 
 document.getElementById('pop-url').addEventListener('keydown', (e) => {
