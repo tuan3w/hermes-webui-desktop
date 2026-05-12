@@ -142,6 +142,45 @@
     .btn:disabled { opacity: 0.5; cursor: default; }
     .btn-primary   { background: #238636; color: #fff; }
     .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+
+    /* ── Dev sim panel ─────────────────────────────────────────────────── */
+    #sim-panel {
+      display: none;
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 999;
+    }
+    #sim-panel.visible { display: flex; }
+    #sim-panel label {
+      font-size: 0.68rem;
+      color: #484f58;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    #sim-panel .sim-row { display: flex; gap: 6px; }
+    .btn-sim {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #c9d1d9;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn-sim:hover { opacity: 0.8; }
+    .btn-sim.red   { border-color: #6e1a1a; color: #f85149; }
+    .btn-sim.green { border-color: #1a4731; color: #3fb950; }
+    .btn-sim.blue  { border-color: #1a3a6e; color: #58a6ff; }
   </style>
 </head>
 <body>
@@ -157,6 +196,18 @@
       <button id="copy-btn" onclick="copyLog()">Copy</button>
     </div>
     <div id="log-lines"></div>
+  </div>
+
+  <!-- Dev sim panel (Shift+D to toggle) -->
+  <div id="sim-panel">
+    <label>Simulate (Shift+D to hide)</label>
+    <div class="sim-row">
+      <button class="btn-sim green" onclick="simLogs()">Streaming logs</button>
+      <button class="btn-sim red"   onclick="simError()">Server timeout</button>
+      <button class="btn-sim red"   onclick="simCrash()">Python crash</button>
+      <button class="btn-sim blue"  onclick="simUpdate()">Update banner</button>
+      <button class="btn-sim"       onclick="simReset()">Reset</button>
+    </div>
   </div>
 
   <!-- Update banner -->
@@ -253,6 +304,97 @@
         btn.textContent = 'Install & Restart';
         document.getElementById('update-subtitle').textContent = 'Error: ' + e;
       }
+    }
+
+    // ── Dev simulation helpers ────────────────────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.shiftKey && e.key === 'D') {
+        var p = document.getElementById('sim-panel');
+        p.classList.toggle('visible');
+      }
+    });
+
+    function simReset() {
+      location.reload();
+    }
+
+    function simLogs() {
+      simReset();
+      setTimeout(function() {
+        var lines = [
+          'Checking Python environment…',
+          'venv OK: /home/user/.local/share/hermes-webui-desktop/venv',
+          'Starting server…',
+          '  * Serving Flask app "server"',
+          '  * Environment: production',
+          '  * Debug mode: off',
+          '  * Running on http://127.0.0.1:42599',
+          'INFO:werkzeug: * Running on http://127.0.0.1:42599 (Press CTRL+C to quit)',
+          'INFO:server: Loaded 3 tools',
+          'INFO:server: Agent ready',
+        ];
+        var i = 0;
+        var interval = setInterval(function() {
+          if (i >= lines.length) { clearInterval(interval); return; }
+          window.__hermesAppendLog(lines[i], false);
+          i++;
+        }, 300);
+      }, 100);
+    }
+
+    function simError() {
+      var lines = [
+        'Checking Python environment…',
+        'venv OK: /home/user/.local/share/hermes-webui-desktop/venv',
+        'Starting server…',
+        'WARNING: bootstrap.py could not find hermes-agent',
+        'INFO: tried: ~/.hermes/hermes-agent, ~/hermes-agent, /usr/local/bin/hermes-agent',
+        'ERROR: No hermes-agent binary found in any expected location',
+      ];
+      var i = 0;
+      var interval = setInterval(function() {
+        if (i >= lines.length) {
+          clearInterval(interval);
+          setTimeout(function() {
+            window.__hermesShowError(
+              'Server did not respond on :42599 within 60 s.\n\nLast output:\n' + lines.join('\n')
+            );
+          }, 600);
+          return;
+        }
+        window.__hermesAppendLog(lines[i], lines[i].startsWith('ERROR'));
+        i++;
+      }, 250);
+    }
+
+    function simCrash() {
+      var lines = [
+        'Checking Python environment…',
+        'Starting server…',
+        'Traceback (most recent call last):',
+        '  File "bootstrap.py", line 12, in <module>',
+        '    import flask',
+        'ModuleNotFoundError: No module named \'flask\'',
+      ];
+      var i = 0;
+      var interval = setInterval(function() {
+        if (i >= lines.length) {
+          clearInterval(interval);
+          setTimeout(function() {
+            window.__hermesShowError(
+              'Server did not respond on :42599 within 60 s.\n\nLast output:\n' + lines.join('\n')
+            );
+          }, 400);
+          return;
+        }
+        var isErr = lines[i].startsWith('Traceback') || lines[i].startsWith(' ') || lines[i].startsWith('Module');
+        window.__hermesAppendLog(lines[i], isErr);
+        i++;
+      }, 200);
+    }
+
+    function simUpdate() {
+      window.__hermesShowUpdate('0.2.0');
     }
   </script>
 </body>
