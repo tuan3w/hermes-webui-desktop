@@ -1,10 +1,10 @@
 [package]
-name = "hermes-webui-desktop"
+name = "delta"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "hermes_webui_desktop_lib"
+name = "delta_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

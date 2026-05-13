@@ -1,108 +1,77 @@
-# Hermes Desktop
+# Delta
 
-Native desktop app for [Hermes Web UI](https://github.com/nesquena/hermes-webui) — a lightweight, dark-themed interface for [Hermes Agent](https://hermes-agent.nousresearch.com/).
+AI-native workspace for Scrum teams. Every work item — spec, research topic, PR, bug — carries its own persistent agent thread. No re-explaining context. No switching tools.
 
-Built with [Tauri v2](https://tauri.app/). Ships as a single installer that bundles the Hermes Web UI Python server — no separate install required.
+Built with [Tauri v2](https://tauri.app/) + [Hermes Web UI](https://github.com/nesquena/hermes-webui).
 
-![Hermes Desktop — sessions view](screenshots/ui-sessions.png)
-![Hermes Desktop — workspace view](screenshots/ui-workspace.png)
+## What it is
 
-## Table of Contents
+Most teams bolt AI on top of existing tools — a chatbot next to Jira, a Copilot next to the editor. Delta takes the opposite approach: the agent is **inside** the work item, not alongside it.
 
-- [Platforms](#platforms)
-- [How it works](#how-it-works)
-- [Building](#building)
-- [macOS — first launch warning](#macos--first-launch-warning)
-- [Staying up to date with upstream](#staying-up-to-date-with-upstream)
-- [Repository structure](#repository-structure)
+- Open a spec → your BA agent loads with the story context already there
+- Open a PR → your dev agent already knows the acceptance criteria it maps to
+- Open a research pipeline → your AI research agent resumes exactly where it left off
+- Files are the source of truth — no database, no sync lock-in
 
-## Download
+## Roles
 
-Grab the latest release from the [Releases page](https://github.com/tuan3w/hermes-webui-desktop/releases/latest).
+| Role | Primary work items |
+|------|--------------------|
+| PO / BA | Story specs (story.md), prototype review |
+| PM | Project portfolio, sprint health, stakeholder reports |
+| SA | Tech specs (tech.md), architecture decisions |
+| AI Engineers | Research pipeline (5 stages), dataset, eval/benchmark |
+| Fullstack Engineers | PR review, tech spec, debug session |
+| QA / QC | Spec verification, bug reports, test automation |
 
-| Platform | File |
-|----------|------|
-| Linux (Debian/Ubuntu) | `hermes-webui-desktop_*_amd64.deb` |
-| Linux (portable) | `hermes-webui-desktop_*_amd64.AppImage` |
-| macOS Intel | `hermes-webui-desktop_*_x64.dmg` |
-| macOS Apple Silicon | `hermes-webui-desktop_*_aarch64.dmg` |
-| Windows | `hermes-webui-desktop_*_x64-setup.exe` |
+## Architecture
 
-## Platforms
+```
+delta/
+├── src-tauri/          # Tauri v2 shell (Rust)
+│   ├── src/lib.rs      # App startup: venv setup, server spawn, updater
+│   └── tauri.conf.json
+├── desktop/            # Splash screen (shown during Python server boot)
+├── hermes-webui/       # Git submodule — Python FastAPI + React chat UI
+└── scripts/
+    └── build-desktop.sh
+```
 
-| Platform | Format |
-|----------|--------|
-| Linux    | `.deb`, `.AppImage` |
-| macOS    | `.dmg` (Intel + Apple Silicon) |
-| Windows  | `.exe` (NSIS installer) |
-
-## How it works
-
-On first launch the app uses the bundled [uv](https://github.com/astral-sh/uv) binary to:
-1. Create a Python 3.11 virtual environment in the app data directory
-2. Install the Python dependencies from `requirements.txt`
-
-Subsequent launches skip setup and start the server immediately (~1–2 s).
-No system Python is required.
+On launch, Delta boots a local Python server (via bundled [uv](https://github.com/astral-sh/uv)) and loads the UI at `127.0.0.1:{port}`. No system Python required.
 
 ## Building
 
 **Prerequisites:** Rust stable, `curl`
 
 ```bash
-# Clone with submodule
-git clone --recurse-submodules https://github.com/tuan3w/hermes-webui-desktop
-cd hermes-webui-desktop
-
-# Build (downloads uv automatically, then builds the Tauri app)
+git clone --recurse-submodules https://github.com/tuan3w/delta
+cd delta
 bash scripts/build-desktop.sh
 ```
 
 Artifacts land in `src-tauri/target/release/bundle/`.
 
-## macOS — first launch warning
+## Download
 
-The app is not signed with an Apple Developer certificate, so macOS Gatekeeper will block it on first launch.
+Latest release: [Releases page](https://github.com/tuan3w/delta/releases/latest)
 
-**One-time fix:**
+| Platform | File |
+|----------|------|
+| macOS Apple Silicon | `delta_*_aarch64.dmg` |
+| macOS Intel | `delta_*_x64.dmg` |
+| Linux (Debian/Ubuntu) | `delta_*_amd64.deb` |
+| Windows | `delta_*_x64-setup.exe` |
 
-1. Right-click (or Control-click) the `.dmg` → **Open**
-2. Click **Open** in the dialog that appears
+## macOS — first launch
 
-Or run this in Terminal after installing:
+The app is unsigned. On first open: right-click → **Open** → **Open**.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/hermes-webui-desktop.app
-```
-
-You only need to do this once.
-
-## Staying up to date with upstream
-
-The Hermes Web UI source lives in `hermes-webui/` as a git submodule pointing at [nesquena/hermes-webui](https://github.com/nesquena/hermes-webui).
-
-A [scheduled workflow](.github/workflows/sync-upstream.yml) bumps the submodule pointer daily and pushes a commit. A [build workflow](.github/workflows/build-release.yml) produces release artifacts whenever a `v*` tag is pushed.
-
-To manually pull the latest upstream:
+Or from terminal:
 
 ```bash
-git submodule update --remote --merge hermes-webui
-git add hermes-webui
-git commit -m "chore: bump hermes-webui"
+xattr -dr com.apple.quarantine /Applications/Delta.app
 ```
 
-## Repository structure
+## Status
 
-```
-hermes-webui-desktop/
-├── src-tauri/                  # Tauri wrapper (Rust)
-│   ├── src/lib.rs              # App logic: venv setup, server spawn
-│   ├── build.rs                # Downloads uv binary at build time
-│   └── tauri.conf.json
-├── desktop/                    # Splash screen shown during startup
-├── scripts/build-desktop.sh    # Local build helper
-├── .github/workflows/
-│   ├── sync-upstream.yml       # Daily submodule bump
-│   └── build-release.yml      # Multi-platform build + GitHub Release
-└── hermes-webui/               # git submodule → nesquena/hermes-webui
-```
+Early development. Core shell is working — Python server boot, auto-update, single-instance window. The work-item workspace UI is in active design.

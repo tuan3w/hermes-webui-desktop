@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hermes-webui-desktop",
+  "productName": "Delta",
   "version": "0.1.0",
-  "identifier": "com.tuan3w.hermes-webui-desktop",
+  "identifier": "com.tuan3w.delta",
   "build": {
     "frontendDist": "../desktop",
     "devUrl": "http://localhost:1421"
