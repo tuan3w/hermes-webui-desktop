@@ -392,17 +392,45 @@ pub fn run() {
                     "{home}/.local/bin:{home}/.hermes/bin:{home}/.cargo/bin:{existing_path}"
                 );
 
+                // Prefer the hermes-agent's own Python (uv tool install or venv) over
+                // the webui venv — it already has run_agent + all agent deps installed.
+                // Read the shebang of the `hermes` CLI to find it; fall back to the
+                // webui venv Python if the hermes binary isn't found.
+                let hermes_python: Option<String> = (|| {
+                    let candidates = [
+                        format!("{home}/.local/bin/hermes"),
+                        format!("{home}/.hermes/bin/hermes"),
+                    ];
+                    for path in &candidates {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            if let Some(first) = content.lines().next() {
+                                if let Some(interp) = first.strip_prefix("#!") {
+                                    let interp = interp.trim().split_whitespace().next().unwrap_or("").to_string();
+                                    if !interp.is_empty() && std::path::Path::new(&interp).exists() {
+                                        return Some(interp);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None
+                })();
+                let webui_python = hermes_python
+                    .as_deref()
+                    .unwrap_or_else(|| python.to_str().unwrap())
+                    .to_string();
+
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
-                        .command(python.to_str().unwrap())
+                        .command(&webui_python)
                         .args([
                             bootstrap_py.to_str().unwrap(),
                             "--foreground",
                         ])
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
-                        .env("HERMES_WEBUI_PYTHON", python.to_str().unwrap())
+                        .env("HERMES_WEBUI_PYTHON", &webui_python)
                         .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
@@ -414,12 +442,12 @@ pub fn run() {
                         .arg("-c")
                         .arg(format!(
                             "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground",
-                            python.display(),
+                            &webui_python,
                             bootstrap_py.display()
                         ))
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
-                        .env("HERMES_WEBUI_PYTHON", python.to_str().unwrap())
+                        .env("HERMES_WEBUI_PYTHON", &webui_python)
                         .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
