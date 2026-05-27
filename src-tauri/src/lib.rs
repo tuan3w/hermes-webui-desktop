@@ -379,9 +379,8 @@ pub fn run() {
                 set_status(&handle, "Starting server…");
 
                 // Launch bootstrap.py --foreground --skip-agent-install.
-                // bootstrap.py discovers HERMES_WEBUI_AGENT_DIR from env vars
-                // and common paths (~/.hermes/hermes-agent, ~/hermes-agent, etc.),
-                // then execs into server.py with the correct env set up.
+                // bootstrap.py discovers or installs hermes-agent, then execs
+                // into server.py with the correct env set up.
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
@@ -389,7 +388,6 @@ pub fn run() {
                         .args([
                             bootstrap_py.to_str().unwrap(),
                             "--foreground",
-                            "--skip-agent-install",
                         ])
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
@@ -402,7 +400,7 @@ pub fn run() {
                         .command("sh")
                         .arg("-c")
                         .arg(format!(
-                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground --skip-agent-install",
+                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground",
                             python.display(),
                             bootstrap_py.display()
                         ))
