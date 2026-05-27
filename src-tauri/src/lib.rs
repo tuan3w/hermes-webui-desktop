@@ -397,32 +397,67 @@ pub fn run() {
 
                 set_status(&handle, "Starting server…");
 
-                // Launch bootstrap.py --foreground --skip-agent-install.
-                // bootstrap.py discovers HERMES_WEBUI_AGENT_DIR from env vars
-                // and common paths (~/.hermes/hermes-agent, ~/hermes-agent, etc.),
-                // then execs into server.py with the correct env set up.
-                // Normalise the Python path so bootstrap.py receives a clean
-                // Win32 path (no \\?\ prefix) regardless of what Tauri gives us.
-                let python_clean = strip_unc_prefix(&python);
-                let python_str = python_clean.to_str().unwrap();
+                // bootstrap.py discovers or installs hermes-agent, then execs
+                // into server.py with the correct env set up.
+                //
+                // Augment PATH so shutil.which("hermes") and shutil.which("uv")
+                // find binaries installed by uv tool / cargo / pip even when
+                // the desktop app is launched outside a login shell.
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_default();
+                let existing_path = std::env::var("PATH").unwrap_or_default();
+                let augmented_path = format!(
+                    "{home}/.local/bin:{home}/.hermes/bin:{home}/.cargo/bin:{existing_path}"
+                );
+
+                // Prefer the hermes-agent's own Python (uv tool install or venv) over
+                // the webui venv — it already has run_agent + all agent deps installed.
+                // Read the shebang of the `hermes` CLI to find it; fall back to the
+                // webui venv Python if the hermes binary isn't found.
+                let hermes_python: Option<String> = (|| {
+                    let candidates = [
+                        format!("{home}/.local/bin/hermes"),
+                        format!("{home}/.hermes/bin/hermes"),
+                    ];
+                    for path in &candidates {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            if let Some(first) = content.lines().next() {
+                                if let Some(interp) = first.strip_prefix("#!") {
+                                    let interp = interp.trim().split_whitespace().next().unwrap_or("").to_string();
+                                    if !interp.is_empty() && std::path::Path::new(&interp).exists() {
+                                        return Some(interp);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None
+                })();
+                // Strip \\?\ prefix from the resolved Python path so bootstrap.py
+                // and subprocess calls receive a plain Win32 path, not a UNC path.
+                let webui_python = {
+                    let raw = hermes_python
+                        .as_deref()
+                        .unwrap_or_else(|| python.to_str().unwrap())
+                        .to_string();
+                    if raw.starts_with(r"\\?\") { raw[4..].to_string() } else { raw }
+                };
 
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
-                        .command(python_str)
+                        .command(&webui_python)
                         .args([
                             bootstrap_py.to_str().unwrap(),
                             "--foreground",
-                            "--skip-agent-install",
                         ])
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
+                        .env("HERMES_WEBUI_PYTHON", &webui_python)
+                        .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .env("HERMES_DESKTOP", "1")
-                        // Pin bootstrap.py to the exact venv Python we set up so
-                        // discover_launcher_python() never picks up a system Python
-                        // or the Windows Store stub via shutil.which().
-                        .env("HERMES_WEBUI_PYTHON", python_str)
                         .current_dir(&resource_dir)
                         .spawn()
                 } else {
@@ -431,15 +466,16 @@ pub fn run() {
                         .command("sh")
                         .arg("-c")
                         .arg(format!(
-                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground --skip-agent-install",
-                            python_clean.display(),
+                            "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground",
+                            &webui_python,
                             bootstrap_py.display()
                         ))
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
+                        .env("HERMES_WEBUI_PYTHON", &webui_python)
+                        .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .env("HERMES_DESKTOP", "1")
-                        .env("HERMES_WEBUI_PYTHON", python_str)
                         .current_dir(&resource_dir)
                         .spawn()
                 };
