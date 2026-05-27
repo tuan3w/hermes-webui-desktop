@@ -48,6 +48,8 @@ jobs:
 
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -101,6 +103,8 @@ jobs:
 
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -148,6 +152,8 @@ jobs:
 
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
