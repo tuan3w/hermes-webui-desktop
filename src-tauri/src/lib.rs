@@ -46,6 +46,23 @@ fn venv_python(venv_dir: &Path) -> PathBuf {
     }
 }
 
+/// Strip the `\\?\` extended-length prefix that Windows APIs sometimes produce.
+/// Tools like `uv` and Python subprocess calls can fail when given such paths.
+#[cfg(windows)]
+fn strip_unc_prefix(path: &Path) -> std::borrow::Cow<'_, Path> {
+    let s = path.to_str().unwrap_or("");
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        std::borrow::Cow::Owned(PathBuf::from(stripped))
+    } else {
+        std::borrow::Cow::Borrowed(path)
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_unc_prefix(path: &Path) -> std::borrow::Cow<'_, Path> {
+    std::borrow::Cow::Borrowed(path)
+}
+
 fn show_window(handle: &tauri::AppHandle) {
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.show();
@@ -133,16 +150,18 @@ async fn ensure_venv(
     set_status(handle, "Setting up Python environment (first launch)…");
     eprintln!("[hermes] Creating venv at {}", venv_dir.display());
 
-    run_uv(handle, &["venv", "--python", UV_PYTHON, venv_dir.to_str().unwrap()])
+    let venv_dir_norm = strip_unc_prefix(&venv_dir);
+    run_uv(handle, &["venv", "--python", UV_PYTHON, venv_dir_norm.to_str().unwrap()])
         .await
         .map_err(|e| format!("Could not create Python environment.\n\n{e}"))?;
 
     let req = resource_dir.join("requirements.txt");
     set_status(handle, "Installing Python dependencies…");
 
+    let python_norm = strip_unc_prefix(&python);
     run_uv(
         handle,
-        &["pip", "install", "-r", req.to_str().unwrap(), "--python", python.to_str().unwrap()],
+        &["pip", "install", "-r", req.to_str().unwrap(), "--python", python_norm.to_str().unwrap()],
     )
     .await
     .map_err(|e| format!("Could not install Python dependencies.\n\n{e}"))?;
@@ -382,10 +401,15 @@ pub fn run() {
                 // bootstrap.py discovers HERMES_WEBUI_AGENT_DIR from env vars
                 // and common paths (~/.hermes/hermes-agent, ~/hermes-agent, etc.),
                 // then execs into server.py with the correct env set up.
+                // Normalise the Python path so bootstrap.py receives a clean
+                // Win32 path (no \\?\ prefix) regardless of what Tauri gives us.
+                let python_clean = strip_unc_prefix(&python);
+                let python_str = python_clean.to_str().unwrap();
+
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
-                        .command(python.to_str().unwrap())
+                        .command(python_str)
                         .args([
                             bootstrap_py.to_str().unwrap(),
                             "--foreground",
@@ -394,6 +418,11 @@ pub fn run() {
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("PYTHONDONTWRITEBYTECODE", "1")
+                        .env("HERMES_DESKTOP", "1")
+                        // Pin bootstrap.py to the exact venv Python we set up so
+                        // discover_launcher_python() never picks up a system Python
+                        // or the Windows Store stub via shutil.which().
+                        .env("HERMES_WEBUI_PYTHON", python_str)
                         .current_dir(&resource_dir)
                         .spawn()
                 } else {
@@ -403,12 +432,14 @@ pub fn run() {
                         .arg("-c")
                         .arg(format!(
                             "unset PYTHONHOME PYTHONPATH; exec '{}' '{}' --foreground --skip-agent-install",
-                            python.display(),
+                            python_clean.display(),
                             bootstrap_py.display()
                         ))
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("PYTHONDONTWRITEBYTECODE", "1")
+                        .env("HERMES_DESKTOP", "1")
+                        .env("HERMES_WEBUI_PYTHON", python_str)
                         .current_dir(&resource_dir)
                         .spawn()
                 };
