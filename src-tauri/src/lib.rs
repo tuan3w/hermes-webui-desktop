@@ -378,9 +378,20 @@ pub fn run() {
 
                 set_status(&handle, "Starting server…");
 
-                // Launch bootstrap.py --foreground --skip-agent-install.
                 // bootstrap.py discovers or installs hermes-agent, then execs
                 // into server.py with the correct env set up.
+                //
+                // Augment PATH so shutil.which("hermes") and shutil.which("uv")
+                // find binaries installed by uv tool / cargo / pip even when
+                // the desktop app is launched outside a login shell.
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_default();
+                let existing_path = std::env::var("PATH").unwrap_or_default();
+                let augmented_path = format!(
+                    "{home}/.local/bin:{home}/.hermes/bin:{home}/.cargo/bin:{existing_path}"
+                );
+
                 let spawn_result = if cfg!(windows) {
                     handle
                         .shell()
@@ -392,6 +403,7 @@ pub fn run() {
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("HERMES_WEBUI_PYTHON", python.to_str().unwrap())
+                        .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
                         .spawn()
@@ -408,6 +420,7 @@ pub fn run() {
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
                         .env("HERMES_WEBUI_PYTHON", python.to_str().unwrap())
+                        .env("PATH", &augmented_path)
                         .env("PYTHONDONTWRITEBYTECODE", "1")
                         .current_dir(&resource_dir)
                         .spawn()
