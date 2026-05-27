@@ -16,7 +16,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_REPLACE_WITH_YOUR_PUBLIC_KEY",
+      "pubkey": "RWRGSiyCnCULFan9LJpL8w8i3DffC7x3OWg+Tblwst1ehHCK48SZ1AQt",
       "endpoints": [
         "https://github.com/tuan3w/hermes-webui-desktop/releases/latest/download/latest.json"
       ]
