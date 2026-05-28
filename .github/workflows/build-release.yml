@@ -14,6 +14,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: build-release
   cancel-in-progress: true
@@ -33,10 +36,20 @@ jobs:
           packages: >-
             libwebkit2gtk-4.1-dev libxdo-dev
             libayatana-appindicator3-dev librsvg2-dev
-            imagemagick mold
+            imagemagick mold clang
           version: 1.0
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # Cache ~/.cargo/bin (tauri-cli binary) separately so we can skip the
+      # binstall step on cache hits. Key includes "tauri2" — bump to bust cache
+      # when upgrading tauri-cli major version.
+      - name: Cache cargo bin
+        id: cargo-bin-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-linux-tauri2
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,9 +57,11 @@ jobs:
           cache-on-failure: true
 
       - name: Install cargo-binstall
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install tauri-cli
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,6 +81,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CARGO_PROFILE_RELEASE_LTO: thin
+          # mold is installed above — use it instead of the default BFD linker.
+          # clang is the driver; -fuse-ld=mold selects mold as the backend.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
         run: cd src-tauri && cargo tauri build --bundles deb,appimage
 
       - uses: actions/upload-artifact@v4
@@ -92,6 +111,13 @@ jobs:
         with:
           targets: ${{ matrix.arch }}-apple-darwin
 
+      - name: Cache cargo bin
+        id: cargo-bin-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-macos-${{ matrix.arch }}-tauri2
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -99,9 +125,11 @@ jobs:
           cache-on-failure: true
 
       - name: Install cargo-binstall
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install tauri-cli
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,6 +149,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CARGO_PROFILE_RELEASE_LTO: thin
+          # lld ships with Apple's LLVM on macos-latest — faster than ld64
+          # for linking the final binary (codegen is unchanged).
+          RUSTFLAGS: -C link-arg=-fuse-ld=lld
         run: |
           cd src-tauri
           cargo tauri build --bundles dmg --target ${{ matrix.arch }}-apple-darwin
@@ -142,15 +173,24 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache cargo bin
+        id: cargo-bin-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-windows-tauri2
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           cache-on-failure: true
 
       - name: Install cargo-binstall
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install tauri-cli
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo binstall tauri-cli --version "^2.0" --no-confirm --locked
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -169,6 +209,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CARGO_PROFILE_RELEASE_LTO: thin
+          # lld-link is bundled with Rust's MSVC toolchain — faster than
+          # link.exe for the final link step.
+          RUSTFLAGS: -C linker=lld-link
         run: cd src-tauri && cargo tauri build --bundles nsis
 
       - uses: actions/upload-artifact@v4
