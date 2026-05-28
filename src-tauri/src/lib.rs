@@ -544,6 +544,7 @@ pub fn run() {
                         .args([
                             bootstrap_py.to_str().unwrap(),
                             "--foreground",
+                            "--skip-agent-install",
                         ])
                         .env("HERMES_WEBUI_HOST", SERVER_HOST)
                         .env("HERMES_WEBUI_PORT", port.to_string())
