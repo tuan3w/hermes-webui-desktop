@@ -171,6 +171,63 @@ async fn ensure_venv(
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 
+/// Injected into every page load of the Python server. Idempotent — checks for
+/// existing banner before creating DOM nodes. Matches Delta design system palette.
+const INJECT_BANNER_JS: &str = r#"(function(){
+  if(document.getElementById('__hu-banner'))return;
+  var s=document.createElement('style');
+  s.textContent=[
+    '#__hu-banner{position:fixed;bottom:20px;left:20px;background:#0f1011;border:1px solid #23252a;',
+    'border-radius:12px;padding:14px 16px;width:272px;box-shadow:0 4px 24px rgba(0,0,0,.7);',
+    'font-family:system-ui,-apple-system,sans-serif;z-index:2147483647;display:none;}',
+    '#__hu-banner.hu-on{display:block;}',
+    '#__hu-title{font-size:13px;font-weight:600;color:#f7f8f8;letter-spacing:-.02em;margin-bottom:3px;}',
+    '#__hu-sub{font-size:12px;color:#8a8f98;margin-bottom:12px;}',
+    '#__hu-actions{display:flex;gap:8px;justify-content:flex-end;}',
+    '.__hu-btn{padding:5px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;',
+    'border:none;font-family:inherit;transition:opacity .15s;}',
+    '.__hu-btn:hover{opacity:.8;}.__hu-btn:disabled{opacity:.45;cursor:default;}',
+    '.__hu-primary{background:#5e6ad2;color:#fff;}',
+    '.__hu-ghost{background:transparent;color:#8a8f98;border:1px solid #23252a;}'
+  ].join('');
+  document.head.appendChild(s);
+  var d=document.createElement('div');
+  d.id='__hu-banner';
+  d.innerHTML='<div id="__hu-title">Update available</div>'
+    +'<div id="__hu-sub">A new version is ready to install.</div>'
+    +'<div id="__hu-actions">'
+    +'<button class="__hu-btn __hu-ghost" onclick="window.__hermesUpdateLater()">Later</button>'
+    +'<button class="__hu-btn __hu-primary" id="__hu-install" onclick="window.__hermesInstallUpdate()">Update</button>'
+    +'</div>';
+  document.body.appendChild(d);
+  window.__hermesShowUpdate=function(v){
+    document.getElementById('__hu-title').textContent='Update available — v'+v;
+    document.getElementById('__hu-banner').classList.add('hu-on');
+  };
+  window.__hermesUpdateLater=function(){
+    document.getElementById('__hu-banner').classList.remove('hu-on');
+  };
+  window.__hermesInstallUpdate=async function(){
+    var btn=document.getElementById('__hu-install');
+    var sub=document.getElementById('__hu-sub');
+    btn.disabled=true;btn.textContent='Installing…';
+    try{
+      await window.__TAURI__.core.invoke('install_update');
+    }catch(e){
+      btn.disabled=false;btn.textContent='Update';
+      sub.textContent='Error: '+e;
+    }
+  };
+})();"#;
+
+fn inject_and_show_update(win: &tauri::WebviewWindow<tauri::Wry>, version: &str) {
+    let _ = win.eval(INJECT_BANNER_JS);
+    let v = version.replace('"', "\\\"");
+    let _ = win.eval(&format!(
+        r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
+    ));
+}
+
 async fn background_check_update(handle: tauri::AppHandle) {
     let updater = match handle.updater() {
         Ok(u) => u,
@@ -182,10 +239,7 @@ async fn background_check_update(handle: tauri::AppHandle) {
             eprintln!("[updater] new version: {version}");
             *handle.state::<UpdateState>().pending.lock().unwrap() = Some(update);
             if let Some(win) = handle.get_webview_window("main") {
-                let v = version.replace('"', "\\\"");
-                let _ = win.eval(&format!(
-                    r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
-                ));
+                inject_and_show_update(&win, &version);
             }
         }
         Ok(None) => eprintln!("[updater] up to date"),
@@ -290,10 +344,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                                 Ok(Some(version)) => {
                                     if let Some(win) = h.get_webview_window("main") {
                                         show_window(&h);
-                                        let v = version.replace('"', "\\\"");
-                                        let _ = win.eval(&format!(
-                                            r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
-                                        ));
+                                        inject_and_show_update(&win, &version);
                                     }
                                 }
                                 Ok(None) => eprintln!("[updater] up to date"),
@@ -348,6 +399,7 @@ pub fn run() {
         .setup(|app| {
             build_tray(app)?;
 
+            let page_load_handle = app.handle().clone();
             let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -356,6 +408,29 @@ pub fn run() {
             .title("Hermes")
             .inner_size(1400.0, 900.0)
             .min_inner_size(900.0, 600.0)
+            .on_page_load(move |win, payload| {
+                // Only inject into the Python server pages, not the splash screen.
+                // The splash screen already has its own update banner HTML.
+                let url = payload.url().as_str();
+                if url.starts_with("http://127.0.0.1") {
+                    let _ = win.eval(INJECT_BANNER_JS);
+                    // If an update was already found (race: check completed before nav),
+                    // show the banner immediately in this new page context.
+                    if let Some(version) = page_load_handle
+                        .state::<UpdateState>()
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map(|u| u.version.clone())
+                    {
+                        let v = version.replace('"', "\\\"");
+                        let _ = win.eval(&format!(
+                            r#"window.__hermesShowUpdate && window.__hermesShowUpdate("{v}")"#
+                        ));
+                    }
+                }
+            })
             .build()?;
 
             #[cfg(target_os = "linux")]
