@@ -149,9 +149,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CARGO_PROFILE_RELEASE_LTO: thin
-          # lld ships with Apple's LLVM on macos-latest — faster than ld64
-          # for linking the final binary (codegen is unchanged).
-          RUSTFLAGS: -C link-arg=-fuse-ld=lld
         run: |
           cd src-tauri
           cargo tauri build --bundles dmg --target ${{ matrix.arch }}-apple-darwin
